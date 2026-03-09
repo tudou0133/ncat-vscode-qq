@@ -247,10 +247,7 @@ function renderSettingsScript() {
       });
 
       document.getElementById('settingClearCache').addEventListener('click', () => {
-        const ok = window.confirm('确认清空本地会话缓存吗？此操作不会影响 QQ 服务器消息。');
-        if (!ok) {
-          return;
-        }
+        logWeb('info', 'clear cache clicked');
         vscode.postMessage({
           type: 'settingsAction',
           action: 'clearCache',

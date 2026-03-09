@@ -824,6 +824,7 @@ class NCatRuntime {
     this.persistTimer = null;
     this.historyLoadInFlight = null;
     this.historyLoadedForConnection = false;
+    this.historyIngestEpoch = 0;
     this.userDisplayNameCache = new Map();
     this.groupMemberNameCache = new Map();
     this.pendingNameLookups = new Map();
@@ -844,6 +845,7 @@ class NCatRuntime {
     this.backendManualMode = false;
     this.backendLastWsReadyAt = 0;
     this.backendUnsupportedHints = new Map();
+    this.mediaRetryNoRetryIds = new Set();
     this.detectedBackendWebUrl = '';
     this.detectedBackendWebToken = '';
     this.runtimeActive = true;
@@ -2338,11 +2340,28 @@ class NCatRuntime {
 
   clearChatCache() {
     const count = this.chatSessions.size;
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.historyIngestEpoch += 1;
+    this.historyLoadInFlight = null;
     this.chatSessions.clear();
+    this.contactDirectory.clear();
+    this.contactDirectoryLoaded = false;
+    this.contactDirectoryLoading = null;
+    this.groupMembersByGroupId.clear();
+    this.groupMembersLoading.clear();
+    this.pendingNameLookups.clear();
+    this.backendUnsupportedHints.clear();
+    this.mediaRetryNoRetryIds.clear();
+    this.historyLoadedForConnection = true;
     this.recentOutgoingPokes = [];
     this.persistCacheNow();
     this.emitUiUpdate();
-    this.log(`Local chat cache cleared: removed_sessions=${count}`);
+    this.log(
+      `Local chat cache cleared: removed_sessions=${count}, historyPreloadBlockedForCurrentConnection=true, ingestEpoch=${this.historyIngestEpoch}`
+    );
   }
 
   restoreHiddenTargets() {
@@ -4233,6 +4252,141 @@ class NCatRuntime {
     }
 
     throw new Error(`Unsupported chat type: ${chatType}`);
+  }
+
+  async refreshMessageMediaForChat(chatId, options = {}) {
+    const fullId = String(chatId || '').trim();
+    if (!fullId) {
+      throw new Error('chatId is empty');
+    }
+
+    const session = this.chatSessions.get(fullId);
+    if (!session) {
+      throw new Error(`chat session not found: ${fullId}`);
+    }
+
+    const localMessageId = String(options?.localMessageId || '').trim();
+    const rawMessageIdInput = String(options?.rawMessageId || '').trim();
+    const sourceUrl = String(options?.sourceUrl || '').trim();
+    const trigger = String(options?.trigger || 'manual').trim();
+
+    let targetMessage = null;
+    if (localMessageId) {
+      targetMessage = session.messages.find((item) => String(item?.id || '') === localMessageId) || null;
+    }
+
+    let rawMessageId = rawMessageIdInput;
+    if (!rawMessageId && targetMessage) {
+      rawMessageId = String(targetMessage.rawMessageId || '').trim();
+    }
+    if (!targetMessage && rawMessageId && session.messageIdIndex instanceof Map) {
+      targetMessage = session.messageIdIndex.get(rawMessageId) || null;
+    }
+    if (!rawMessageId) {
+      throw new Error('rawMessageId is empty');
+    }
+
+    const splitAt = fullId.indexOf(':');
+    if (splitAt <= 0 || splitAt === fullId.length - 1) {
+      throw new Error(`Unsupported chat id: ${fullId}`);
+    }
+    const chatType = fullId.slice(0, splitAt);
+    const targetId = fullId.slice(splitAt + 1);
+    if (chatType !== 'private' && chatType !== 'group') {
+      throw new Error(`Unsupported chat type: ${chatType}`);
+    }
+
+    const noRetryKey = `${fullId}|${rawMessageId}`;
+    if (this.mediaRetryNoRetryIds.has(noRetryKey)) {
+      return {
+        ok: false,
+        updated: false,
+        rawMessageId,
+        noRetry: true,
+        error: '消息不存在',
+      };
+    }
+
+    this.log(
+      `refreshMessageMedia start: chat=${fullId}, localMessageId=${localMessageId || '(none)'}, rawMessageId=${rawMessageId}, trigger=${trigger}, sourceUrl=${sourceUrl || '(none)'}`
+    );
+
+    const response = await this.callApi('get_msg', {
+      message_id: toActionId(rawMessageId),
+    });
+    if (response?.status !== 'ok') {
+      const retcode = Number(response?.retcode);
+      const errText = String(response?.wording || response?.message || 'get_msg failed');
+      const isMissing = retcode === 1200 || errText.includes('消息不存在');
+      if (isMissing) {
+        this.mediaRetryNoRetryIds.add(noRetryKey);
+        if (this.mediaRetryNoRetryIds.size > 2000) {
+          const first = this.mediaRetryNoRetryIds.values().next();
+          if (first && !first.done) {
+            this.mediaRetryNoRetryIds.delete(first.value);
+          }
+        }
+        this.log(`refreshMessageMedia no-retry: chat=${fullId}, rawMessageId=${rawMessageId}, reason=${errText}`);
+        return {
+          ok: false,
+          updated: false,
+          rawMessageId,
+          noRetry: true,
+          error: errText,
+        };
+      }
+      throw new Error(errText);
+    }
+
+    const normalized = normalizeSegments(response?.data || {});
+    if (!Array.isArray(normalized) || normalized.length === 0) {
+      throw new Error('get_msg returned empty segments');
+    }
+
+    const refreshedSegments = await this.decorateSegmentsForDisplay(normalized, {
+      chatType,
+      targetId,
+      chatId: fullId,
+      allowRemoteLookup: false,
+    });
+    if (!Array.isArray(refreshedSegments) || refreshedSegments.length === 0) {
+      throw new Error('decorate refreshed segments failed');
+    }
+
+    if (!targetMessage) {
+      this.log(`refreshMessageMedia skipped update: message not found in cache, chat=${fullId}, rawMessageId=${rawMessageId}`);
+      return {
+        ok: false,
+        updated: false,
+        rawMessageId,
+        error: 'message not found in local cache',
+      };
+    }
+
+    targetMessage.segments = refreshedSegments;
+    const sender = response?.data?.sender || {};
+    const senderId = String(sender?.user_id || '').trim();
+    const senderName = String(sender?.card || sender?.nickname || '').trim();
+    if (senderId) {
+      targetMessage.senderId = senderId;
+    }
+    if (senderName) {
+      targetMessage.senderName = senderName;
+    }
+    if (senderId && senderName) {
+      this.rememberDisplayName(senderId, senderName, chatType === 'group' ? targetId : '');
+    }
+
+    this.pruneSessionMessages(session);
+    this.emitUiUpdate();
+    this.schedulePersistCache();
+    this.log(`refreshMessageMedia success: chat=${fullId}, rawMessageId=${rawMessageId}, segments=${refreshedSegments.length}`);
+    return {
+      ok: true,
+      updated: true,
+      rawMessageId,
+      segmentCount: refreshedSegments.length,
+    };
   }
 
   parseRecentContacts(response) {

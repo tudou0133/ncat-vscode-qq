@@ -54,7 +54,10 @@ function extractHistoryMessages(response) {
   return [];
 }
 
-async function ingestHistoryMessage(runtime, item, contact, cutoffTs) {
+async function ingestHistoryMessage(runtime, item, contact, cutoffTs, ingestEpoch = Number(runtime.historyIngestEpoch || 0)) {
+  if (Number(runtime.historyIngestEpoch || 0) !== Number(ingestEpoch)) {
+    return false;
+  }
   const messageType = contact.type === 'group' ? 'group' : 'private';
   const isGroup = messageType === 'group';
   const targetId = String(contact.targetId || (isGroup ? item?.group_id || '' : item?.user_id || ''));
@@ -101,7 +104,10 @@ async function ingestHistoryMessage(runtime, item, contact, cutoffTs) {
   });
 }
 
-async function loadHistoryForContact(runtime, contact, cutoffTs, countOverride = 80) {
+async function loadHistoryForContact(runtime, contact, cutoffTs, countOverride = 80, ingestEpoch = Number(runtime.historyIngestEpoch || 0)) {
+  if (Number(runtime.historyIngestEpoch || 0) !== Number(ingestEpoch)) {
+    return;
+  }
   const count = Math.max(20, Math.min(800, Number(countOverride || 80)));
   if (contact.type === 'group') {
     const response = await runtime.callApi('get_group_msg_history', {
@@ -110,7 +116,10 @@ async function loadHistoryForContact(runtime, contact, cutoffTs, countOverride =
     });
     const rows = extractHistoryMessages(response);
     for (const item of rows.sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0))) {
-      await ingestHistoryMessage(runtime, item, contact, cutoffTs);
+      if (Number(runtime.historyIngestEpoch || 0) !== Number(ingestEpoch)) {
+        return;
+      }
+      await ingestHistoryMessage(runtime, item, contact, cutoffTs, ingestEpoch);
     }
     return;
   }
@@ -123,7 +132,10 @@ async function loadHistoryForContact(runtime, contact, cutoffTs, countOverride =
   });
   const rows = extractHistoryMessages(response);
   for (const item of rows.sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0))) {
-    await ingestHistoryMessage(runtime, item, contact, cutoffTs);
+    if (Number(runtime.historyIngestEpoch || 0) !== Number(ingestEpoch)) {
+      return;
+    }
+    await ingestHistoryMessage(runtime, item, contact, cutoffTs, ingestEpoch);
   }
 }
 
@@ -133,6 +145,7 @@ async function loadRecentHistoryOneDay(runtime) {
   }
 
   runtime.historyLoadInFlight = (async () => {
+    const ingestEpoch = Number(runtime.historyIngestEpoch || 0);
     if (!runtime.isConnected()) {
       return;
     }
@@ -143,8 +156,12 @@ async function loadRecentHistoryOneDay(runtime) {
     runtime.log(`History preload start: contacts=${contacts.length}`);
 
     for (const contact of contacts) {
+      if (Number(runtime.historyIngestEpoch || 0) !== ingestEpoch) {
+        runtime.log(`History preload aborted: ingestEpoch changed (${ingestEpoch} -> ${runtime.historyIngestEpoch}).`);
+        return;
+      }
       try {
-        await loadHistoryForContact(runtime, contact, cutoffTs, 80);
+        await loadHistoryForContact(runtime, contact, cutoffTs, 80, ingestEpoch);
         const session = runtime.chatSessions.get(`${contact.type}:${contact.targetId}`);
         if (session) {
           session.historyCount = Math.max(Number(session.historyCount || 80), 80);
@@ -154,10 +171,14 @@ async function loadRecentHistoryOneDay(runtime) {
       }
     }
 
-    runtime.pruneAllSessions();
-    runtime.emitUiUpdate();
-    runtime.schedulePersistCache();
-    runtime.log('History preload finished.');
+    if (Number(runtime.historyIngestEpoch || 0) === ingestEpoch) {
+      runtime.pruneAllSessions();
+      runtime.emitUiUpdate();
+      runtime.schedulePersistCache();
+      runtime.log('History preload finished.');
+    } else {
+      runtime.log(`History preload ignored: ingestEpoch changed (${ingestEpoch} -> ${runtime.historyIngestEpoch}).`);
+    }
   })();
 
   try {
@@ -193,9 +214,14 @@ async function loadOlderMessagesForChat(runtime, chatId) {
   runtime.emitUiUpdate();
 
   const beforeCount = session.messages.length;
+  const ingestEpoch = Number(runtime.historyIngestEpoch || 0);
   try {
     session.historyCount = Math.min(800, Number(session.historyCount || 80) + 80);
-    await loadHistoryForContact(runtime, contact, runtime.getHistoryCutoff(), session.historyCount);
+    await loadHistoryForContact(runtime, contact, runtime.getHistoryCutoff(), session.historyCount, ingestEpoch);
+    if (Number(runtime.historyIngestEpoch || 0) !== ingestEpoch) {
+      runtime.log(`loadOlderMessagesForChat aborted by clear cache: ${key}`);
+      return 0;
+    }
     runtime.pruneSessionMessages(session);
     runtime.emitUiUpdate();
     runtime.schedulePersistCache();

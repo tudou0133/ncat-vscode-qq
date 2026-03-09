@@ -319,6 +319,7 @@ class NCatSidebarProvider {
         if (action === 'clearCache') {
           this.runtime.clearChatCache();
           this.selectedChatId = '';
+          this.searchQuery = '';
           this.pushState();
           this.view?.webview.postMessage({
             type: 'settingsActionResult',
@@ -462,6 +463,56 @@ class NCatSidebarProvider {
             error: reason,
             dataUrl: '',
             name: '',
+          });
+        }
+        return;
+      }
+
+      if (msg.type === 'retryMessageMedia') {
+        const chatId = String(msg.chatId || '').trim();
+        const messageId = String(msg.messageId || '').trim();
+        const rawMessageId = String(msg.rawMessageId || '').trim();
+        const sourceUrl = String(msg.sourceUrl || '').trim();
+        const reason = String(msg.reason || '').trim();
+        if (!chatId || (!messageId && !rawMessageId)) {
+          this.view?.webview.postMessage({
+            type: 'retryMessageMediaResult',
+            ok: false,
+            chatId,
+            messageId,
+            rawMessageId,
+            error: 'invalid retry payload',
+          });
+          return;
+        }
+        try {
+          const result = await this.runtime.refreshMessageMediaForChat(chatId, {
+            localMessageId: messageId,
+            rawMessageId,
+            sourceUrl,
+            trigger: reason || 'web-media-retry',
+          });
+          this.view?.webview.postMessage({
+            type: 'retryMessageMediaResult',
+            ok: Boolean(result?.ok),
+            updated: Boolean(result?.updated),
+            chatId,
+            messageId,
+            rawMessageId: String(result?.rawMessageId || rawMessageId),
+            noRetry: Boolean(result?.noRetry),
+            error: String(result?.error || ''),
+          });
+        } catch (error) {
+          const errText = error?.message || String(error);
+          this.runtime.log(`retryMessageMedia failed: chatId=${chatId}, messageId=${messageId}, rawMessageId=${rawMessageId}, reason=${errText}`);
+          this.view?.webview.postMessage({
+            type: 'retryMessageMediaResult',
+            ok: false,
+            updated: false,
+            chatId,
+            messageId,
+            rawMessageId,
+            error: errText,
           });
         }
         return;
@@ -1112,13 +1163,15 @@ class NCatSidebarProvider {
     const quickLoginUin = String(msg?.quickLoginUin || '').trim();
 
     const config = vscode.workspace.getConfiguration();
-    const target = vscode.ConfigurationTarget.Workspace;
+    const hasWorkspace = Array.isArray(vscode.workspace.workspaceFolders) && vscode.workspace.workspaceFolders.length > 0;
+    const target = hasWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    const targetName = hasWorkspace ? 'workspace' : 'global';
     try {
       await config.update('ncat.rootDir', rootDir, target);
       await config.update('ncat.tokenFile', tokenFile, target);
       await config.update('ncat.quickLoginUin', quickLoginUin, target);
       this.runtime.log(
-        `Backend settings saved: rootDir=${rootDir || '(empty)'}, quickLoginUin=${quickLoginUin || '(empty)'}`
+        `Backend settings saved: target=${targetName}, rootDir=${rootDir || '(empty)'}, quickLoginUin=${quickLoginUin || '(empty)'}`
       );
       return {
         ok: true,

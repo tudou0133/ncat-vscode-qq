@@ -1882,6 +1882,7 @@ function renderHtml(webview) {
     };
     let lastDragLogAt = 0;
     const avatarLogKeys = new Set();
+    const mediaNoRetryRawMessageIds = new Set();
     const SHOW_INVITE_OPEN_ACTION = false;
 
     function fmtTime(ms) {
@@ -2607,6 +2608,34 @@ ${renderMessageScript()}
         return;
       }
 
+      if (msg.type === 'retryMessageMediaResult') {
+        const chatId = String(msg.chatId || '').trim();
+        const messageId = String(msg.messageId || '').trim();
+        const rawMessageId = String(msg.rawMessageId || '').trim();
+        const noRetry = !!msg.noRetry || String(msg.error || '').includes('消息不存在');
+        if (noRetry && rawMessageId) {
+          mediaNoRetryRawMessageIds.add(rawMessageId);
+        }
+        if (msg.ok && msg.updated) {
+          logWeb(
+            'info',
+            'media backend retry success: chat=' + chatId +
+              ', messageId=' + (messageId || '(none)') +
+              ', rawMessageId=' + (rawMessageId || '(none)')
+          );
+        } else {
+          logWeb(
+            'warn',
+            'media backend retry failed: chat=' + chatId +
+              ', messageId=' + (messageId || '(none)') +
+              ', rawMessageId=' + (rawMessageId || '(none)') +
+              ', reason=' + String(msg.error || 'unknown') +
+              (noRetry ? ' (no-retry)' : '')
+          );
+        }
+        return;
+      }
+
       if (msg.type === 'stickerPackListResult') {
         const items = Array.isArray(msg.items) ? msg.items : [];
         stickerPanelState.loading = false;
@@ -2705,6 +2734,15 @@ ${renderMessageScript()}
 
       if (msg.type === 'settingsActionResult') {
         if (msg.action === 'clearCache' && msg.ok) {
+          searchQuery = '';
+          const searchInput = document.getElementById('chatSearch');
+          if (searchInput) {
+            searchInput.value = '';
+          }
+          vscode.postMessage({
+            type: 'updateSearchQuery',
+            query: '',
+          });
           closeSettingsPanel();
           closeBubbleMenu();
           closeAvatarMenu();

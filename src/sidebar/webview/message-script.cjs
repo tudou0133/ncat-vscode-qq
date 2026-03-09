@@ -1,18 +1,153 @@
 function renderMessageScript() {
   return String.raw`
-    function buildSegment(seg, imageMeta) {
+    const mediaResolveCache = new Map();
+    const mediaResolveInFlight = new Map();
+    const mediaResolveFailCache = new Map();
+    const mediaBackendRetrySent = new Set();
+    const MEDIA_RESOLVE_RETRY_COOLDOWN_MS = 90 * 1000;
+
+    async function resolveMediaUrlToDataUrl(rawUrl) {
+      const source = String(rawUrl || '').trim();
+      if (!source || source.startsWith('data:image/')) {
+        return source;
+      }
+      if (!isResolvableImageUrl(source)) {
+        return '';
+      }
+      if (mediaResolveCache.has(source)) {
+        return mediaResolveCache.get(source);
+      }
+      const failState = mediaResolveFailCache.get(source);
+      if (failState && Number(failState.until || 0) > Date.now()) {
+        return '';
+      }
+      if (mediaResolveInFlight.has(source)) {
+        return mediaResolveInFlight.get(source);
+      }
+      const task = requestResolveImageUrl(source)
+        .then((resolved) => {
+          const dataUrl = String(resolved?.dataUrl || '').trim();
+          if (dataUrl.startsWith('data:image/')) {
+            mediaResolveCache.set(source, dataUrl);
+            mediaResolveFailCache.delete(source);
+            return dataUrl;
+          }
+          mediaResolveFailCache.set(source, {
+            until: Date.now() + MEDIA_RESOLVE_RETRY_COOLDOWN_MS,
+            reason: 'empty-data-url',
+          });
+          return '';
+        })
+        .catch((error) => {
+          mediaResolveFailCache.set(source, {
+            until: Date.now() + MEDIA_RESOLVE_RETRY_COOLDOWN_MS,
+            reason: String(error?.message || error || 'resolve-failed'),
+          });
+          return '';
+        })
+        .finally(() => {
+          mediaResolveInFlight.delete(source);
+        });
+      mediaResolveInFlight.set(source, task);
+      return task;
+    }
+
+    function requestBackendRetryForMessageMedia(messageMeta, rawUrl, reason) {
+      const chatId = String(messageMeta?.chatId || '').trim();
+      const messageId = String(messageMeta?.messageId || '').trim();
+      const rawMessageId = String(messageMeta?.rawMessageId || '').trim();
+      const sourceUrl = String(rawUrl || '').trim();
+      if (!chatId || (!messageId && !rawMessageId)) {
+        return;
+      }
+      if (!isPluginRunning() || String(state.connectionState || '') !== 'online') {
+        return;
+      }
+      if (rawMessageId && mediaNoRetryRawMessageIds.has(rawMessageId)) {
+        return;
+      }
+      const key = [chatId, messageId || '-', rawMessageId || '-', sourceUrl || '-'].join('|');
+      if (mediaBackendRetrySent.has(key)) {
+        return;
+      }
+      mediaBackendRetrySent.add(key);
+      logWeb(
+        'info',
+        'media backend retry request: chat=' + chatId +
+          ', messageId=' + (messageId || '(none)') +
+          ', rawMessageId=' + (rawMessageId || '(none)') +
+          ', reason=' + String(reason || 'unknown')
+      );
+      vscode.postMessage({
+        type: 'retryMessageMedia',
+        chatId,
+        messageId,
+        rawMessageId,
+        sourceUrl,
+        reason: String(reason || ''),
+      });
+    }
+
+    function attachImageAutoRecovery({ thumbNode, popupImageNode, rawUrl, messageMeta, reasonTag }) {
+      const source = String(rawUrl || '').trim();
+      if (!source) {
+        return;
+      }
+      let resolving = false;
+      thumbNode.addEventListener('error', () => {
+        if (resolving) {
+          return;
+        }
+        const currentSrc = String(thumbNode.getAttribute('src') || thumbNode.src || '').trim();
+        if (currentSrc.startsWith('data:image/')) {
+          requestBackendRetryForMessageMedia(messageMeta, source, reasonTag + '-resolved-still-failed');
+          return;
+        }
+        resolving = true;
+        resolveMediaUrlToDataUrl(source)
+          .then((nextUrl) => {
+            if (nextUrl && nextUrl !== currentSrc) {
+              thumbNode.src = nextUrl;
+              if (popupImageNode) {
+                popupImageNode.src = nextUrl;
+              }
+              logWeb('info', 'media resolve retry success: type=' + String(reasonTag || 'image') + ', url=' + clipForLog(source));
+              return;
+            }
+            requestBackendRetryForMessageMedia(messageMeta, source, reasonTag + '-resolve-empty');
+          })
+          .catch((error) => {
+            logWeb(
+              'warn',
+              'media resolve retry failed: type=' + String(reasonTag || 'image') +
+                ', url=' + clipForLog(source) +
+                ', reason=' + String(error?.message || error)
+            );
+            requestBackendRetryForMessageMedia(messageMeta, source, reasonTag + '-resolve-failed');
+          })
+          .finally(() => {
+            resolving = false;
+          });
+      });
+    }
+
+    function buildSegment(seg, imageMeta, messageMeta) {
       if (seg.type === 'image') {
         const chip = document.createElement('span');
         chip.className = 'seg-image';
         const enableImagePreview = !!uiPrefs.previewImages;
         const total = Number(imageMeta?.total || 1);
         const index = Number(imageMeta?.index || 1);
+        const rawUrl = String(seg.url || '').trim();
+        const preferredUrl = mediaResolveCache.get(rawUrl) || rawUrl;
+        let popImg = null;
 
-        if (seg.url) {
+        if (preferredUrl) {
           const thumb = document.createElement('img');
           thumb.className = 'seg-image-thumb';
           thumb.loading = 'lazy';
-          thumb.src = seg.url;
+          thumb.referrerPolicy = 'no-referrer';
+          thumb.src = preferredUrl;
           thumb.alt = seg.label || 'image';
           chip.appendChild(thumb);
 
@@ -21,12 +156,21 @@ function renderMessageScript() {
             pop.className = 'img-pop';
             const img = document.createElement('img');
             img.loading = 'lazy';
-            img.src = seg.url;
+            img.referrerPolicy = 'no-referrer';
+            img.src = preferredUrl;
             img.alt = seg.label || 'image';
             pop.appendChild(img);
             chip.appendChild(pop);
             setupHoverPopupPosition(chip, pop, 'image');
+            popImg = img;
           }
+          attachImageAutoRecovery({
+            thumbNode: thumb,
+            popupImageNode: popImg,
+            rawUrl,
+            messageMeta,
+            reasonTag: 'image',
+          });
         } else {
           const fallback = document.createElement('span');
           fallback.className = 'seg-image-fallback';
@@ -51,15 +195,24 @@ function renderMessageScript() {
         const videoUrl = String(seg.url || '').trim();
         const hasUrl = videoUrl.length > 0;
         const coverUrl = String(seg.coverUrl || '').trim();
+        const preferredCoverUrl = mediaResolveCache.get(coverUrl) || coverUrl;
 
-        if (coverUrl) {
+        if (preferredCoverUrl) {
           const thumb = document.createElement('img');
           thumb.className = 'seg-video-thumb';
           thumb.loading = 'lazy';
-          thumb.src = coverUrl;
+          thumb.referrerPolicy = 'no-referrer';
+          thumb.src = preferredCoverUrl;
           thumb.alt = seg.label || 'video';
           thumb.addEventListener('error', () => {
-            logWeb('warn', 'video cover load_error: url=' + coverUrl);
+            logWeb('warn', 'video cover load_error: url=' + preferredCoverUrl);
+          });
+          attachImageAutoRecovery({
+            thumbNode: thumb,
+            popupImageNode: null,
+            rawUrl: coverUrl,
+            messageMeta,
+            reasonTag: 'video-cover',
           });
           chip.appendChild(thumb);
         } else if (hasUrl) {
@@ -270,9 +423,9 @@ function renderMessageScript() {
             let node;
             if (item && item.type === 'image') {
               imageIndex += 1;
-              node = buildSegment(item, { index: imageIndex, total: totalImages });
+              node = buildSegment(item, { index: imageIndex, total: totalImages }, null);
             } else {
-              node = buildSegment(item || { type: 'text', text: '' }, { index: 0, total: totalImages });
+              node = buildSegment(item || { type: 'text', text: '' }, { index: 0, total: totalImages }, null);
             }
             if (!node) {
               continue;
@@ -472,14 +625,19 @@ function renderMessageScript() {
         const segments = Array.isArray(msg.segments) ? msg.segments : [];
         const totalImages = segments.reduce((count, seg) => (seg && seg.type === 'image' ? count + 1 : count), 0);
         let imageIndex = 0;
+        const messageMeta = {
+          chatId: String(selected.id || ''),
+          messageId: String(msg.id || ''),
+          rawMessageId: String(msg.rawMessageId || ''),
+        };
 
         for (const seg of segments) {
           let node;
           if (seg && seg.type === 'image') {
             imageIndex += 1;
-            node = buildSegment(seg, { index: imageIndex, total: totalImages });
+            node = buildSegment(seg, { index: imageIndex, total: totalImages }, messageMeta);
           } else {
-            node = buildSegment(seg, { index: 0, total: totalImages });
+            node = buildSegment(seg, { index: 0, total: totalImages }, messageMeta);
           }
           bubble.appendChild(node);
         }
