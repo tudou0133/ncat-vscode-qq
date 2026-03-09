@@ -241,9 +241,64 @@ function renderMessageScript() {
       }
 
       if (seg.type === 'reply') {
-        const reply = document.createElement('span');
+        const reply = document.createElement('div');
         reply.className = 'seg-reply';
-        reply.textContent = seg.text || '[回复]';
+        const replyName = String(seg.replyName || '').trim();
+
+        if (replyName) {
+          const source = document.createElement('span');
+          source.className = 'seg-reply-source';
+          source.textContent = replyName;
+          reply.appendChild(source);
+        }
+
+        const replySegments = Array.isArray(seg.replySegments) ? seg.replySegments : [];
+        if (replySegments.length > 0) {
+          const preview = document.createElement('span');
+          preview.className = 'seg-reply-preview';
+
+          const hasMedia = replySegments.some((item) => item && (item.type === 'image' || item.type === 'video'));
+          const MAX_PREVIEW_SEGMENTS = 6;
+          const previewSource = hasMedia
+            ? replySegments.filter((item) => item && (item.type === 'image' || item.type === 'video'))
+            : replySegments;
+          const displaySegments = previewSource.slice(0, MAX_PREVIEW_SEGMENTS);
+          const totalImages = displaySegments.reduce((count, item) => (item && item.type === 'image' ? count + 1 : count), 0);
+          let imageIndex = 0;
+
+          for (const item of displaySegments) {
+            let node;
+            if (item && item.type === 'image') {
+              imageIndex += 1;
+              node = buildSegment(item, { index: imageIndex, total: totalImages });
+            } else {
+              node = buildSegment(item || { type: 'text', text: '' }, { index: 0, total: totalImages });
+            }
+            if (!node) {
+              continue;
+            }
+            if (item && (item.type === 'image' || item.type === 'video')) {
+              node.classList.add('seg-reply-media');
+            }
+            preview.appendChild(node);
+          }
+
+          if (previewSource.length > displaySegments.length) {
+            const more = document.createElement('span');
+            more.className = 'seg-reply-more';
+            more.textContent = '...';
+            preview.appendChild(more);
+          }
+
+          reply.appendChild(preview);
+          return reply;
+        }
+
+        const fallbackText = String(seg.replyPreview || seg.text || '[回复]').trim();
+        const fallback = document.createElement('span');
+        fallback.className = 'seg-reply-title';
+        fallback.textContent = fallbackText || '[回复]';
+        reply.appendChild(fallback);
         return reply;
       }
 

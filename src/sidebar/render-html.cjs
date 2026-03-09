@@ -1248,6 +1248,63 @@ function renderHtml(webview) {
       font-size: 10px;
       line-height: 1.35;
       word-break: break-word;
+      overflow: visible;
+    }
+
+    .seg-reply-title {
+      display: block;
+      font-size: 10px;
+      line-height: 1.32;
+      color: #d3e1f4;
+    }
+
+    .seg-reply-source {
+      display: block;
+      font-size: 9px;
+      line-height: 1.2;
+      color: rgba(188, 206, 232, 0.9);
+      margin-bottom: 2px;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .seg-reply-preview {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 3px;
+      margin-top: 2px;
+      max-width: 100%;
+    }
+
+    .seg-reply-preview > span {
+      font-size: 10px;
+      line-height: 1.25;
+    }
+
+    .seg-reply .seg-image,
+    .seg-reply .seg-video {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      margin: 1px 3px 1px 0;
+    }
+
+    .seg-reply .seg-image-thumb,
+    .seg-reply .seg-video-thumb {
+      border-radius: 7px;
+    }
+
+    .seg-reply .seg-video-playmark {
+      width: 14px;
+      height: 14px;
+      font-size: 8px;
+    }
+
+    .seg-reply-more {
+      opacity: 0.86;
     }
 
     .seg-forward {

@@ -82,6 +82,117 @@ function formatReplyLabel(replyId, refName, refPreview) {
   return replyId ? `[回复 #${replyId}]` : '[回复]';
 }
 
+function buildReplyRenderableSegments(segments) {
+  const input = Array.isArray(segments) ? segments : [];
+  const out = [];
+  const MAX_SEGMENTS = 8;
+
+  for (const seg of input) {
+    if (!seg || typeof seg !== 'object') {
+      continue;
+    }
+    if (out.length >= MAX_SEGMENTS) {
+      break;
+    }
+
+    const type = String(seg.type || '').trim();
+    if (!type) {
+      continue;
+    }
+
+    if (type === 'image') {
+      out.push({
+        type: 'image',
+        url: String(seg.url || '').trim(),
+        label: String(seg.label || 'image').trim() || 'image',
+      });
+      continue;
+    }
+
+    if (type === 'video') {
+      out.push({
+        type: 'video',
+        url: String(seg.url || '').trim(),
+        coverUrl: String(seg.coverUrl || '').trim(),
+        label: String(seg.label || 'video').trim() || 'video',
+      });
+      continue;
+    }
+
+    if (type === 'text') {
+      const text = String(seg.text || '').trim();
+      if (text) {
+        out.push({
+          type: 'text',
+          text,
+        });
+      }
+      continue;
+    }
+
+    if (type === 'mention') {
+      out.push({
+        type: 'mention',
+        text: String(seg.text || '@某人').trim() || '@某人',
+      });
+      continue;
+    }
+
+    if (type === 'face') {
+      out.push({
+        type: 'face',
+        text: String(seg.text || '🙂').trim() || '🙂',
+        label: String(seg.label || '表情').trim() || '表情',
+      });
+      continue;
+    }
+
+    if (type === 'json') {
+      const text = String(seg.title || seg.summary || seg.text || '[JSON消息]').trim();
+      out.push({
+        type: 'text',
+        text: text || '[JSON消息]',
+      });
+      continue;
+    }
+
+    if (type === 'red_packet') {
+      const text = String(seg.text || seg.title || '[红包]').trim();
+      out.push({
+        type: 'text',
+        text: text || '[红包]',
+      });
+      continue;
+    }
+
+    if (type === 'forward') {
+      out.push({
+        type: 'text',
+        text: String(seg.text || '[合并转发]').trim() || '[合并转发]',
+      });
+      continue;
+    }
+
+    if (type === 'reply') {
+      out.push({
+        type: 'text',
+        text: String(seg.text || '[回复]').trim() || '[回复]',
+      });
+      continue;
+    }
+
+    const fallback = String(seg.text || `[${type}]`).trim();
+    if (fallback) {
+      out.push({
+        type: 'text',
+        text: fallback,
+      });
+    }
+  }
+
+  return out;
+}
+
 async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
   const out = [];
   const groupId = context.chatType === 'group' ? String(context.targetId || '') : '';
@@ -115,14 +226,16 @@ async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
       const replyId = String(seg.replyId || '').trim();
       let refName = '';
       let refPreview = '';
+      let refSegments = [];
       if (replyId) {
         if (session && session.messageIdIndex && session.messageIdIndex.has(replyId)) {
           const refMsg = session.messageIdIndex.get(replyId);
           refName = String(refMsg?.senderName || refMsg?.senderId || '').trim();
-          refPreview = safeBriefFromSegments(refMsg?.segments || []);
+          refSegments = Array.isArray(refMsg?.segments) ? refMsg.segments : [];
+          refPreview = safeBriefFromSegments(refSegments);
         }
 
-        if ((!refName || !refPreview) && allowRemoteLookup) {
+        if ((!refName || !refPreview || refSegments.length === 0) && allowRemoteLookup) {
           try {
             const resp = await runtime.callApi('get_msg', { message_id: Number(replyId) || replyId });
             const sender = resp?.data?.sender || {};
@@ -133,8 +246,12 @@ async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
             if (sid && refName) {
               runtime.rememberDisplayName(sid, refName, groupId);
             }
+            const normalizedReplySegments = normalizeSegments(resp?.data || {});
+            if (refSegments.length === 0 && normalizedReplySegments.length > 0) {
+              refSegments = normalizedReplySegments;
+            }
             if (!refPreview) {
-              refPreview = safeBriefFromMessagePayload(resp?.data || {});
+              refPreview = safeBriefFromSegments(normalizedReplySegments);
             }
           } catch {
             // Ignore.
@@ -142,11 +259,13 @@ async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
         }
       }
 
+      const replySegments = buildReplyRenderableSegments(refSegments);
       out.push({
         ...seg,
         text: formatReplyLabel(replyId, refName, refPreview),
         replyName: refName,
         replyPreview: refPreview,
+        replySegments,
       });
       continue;
     }
