@@ -1,0 +1,28 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Environment
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode-test/
+恢复codex.bat
+
+# Local runtime (NCat binaries/config)
+local/ncat/*
+!local/ncat/.gitkeep
+
+# VS Code extension package artifacts
+*.vsix
+*.vsix.tmp

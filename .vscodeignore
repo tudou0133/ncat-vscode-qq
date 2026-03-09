@@ -1,0 +1,16 @@
+# VCS / editor / local
+.git/**
+.gitignore
+.vscode/**
+local/**
+
+# Development-only docs and scripts
+docs/**
+scripts/**
+恢复codex.bat
+
+# Build / metadata not needed in VSIX
+package-lock.json
+**/*.log
+**/*.tmp
+**/*.bak

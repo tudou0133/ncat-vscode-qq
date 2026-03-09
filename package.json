@@ -1,0 +1,156 @@
+{
+  "name": "ncat-vscode-qq",
+  "displayName": "NCat-VSC-QQ",
+  "description": "NCat QQ extension for VS Code.",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/extension.cjs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "publisher": "tudou0133",
+  "author": {
+    "name": "tudou0133",
+    "url": "https://github.com/tudou0133"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tudou0133/napcat-vscode-qq.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tudou0133/napcat-vscode-qq/issues"
+  },
+  "homepage": "https://github.com/tudou0133/napcat-vscode-qq/blob/main/README.md",
+  "icon": "images/icon.png",
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:ncat.connect",
+    "onCommand:ncat.disconnect",
+    "onCommand:ncat.bossKey",
+    "onCommand:ncat.startBackend",
+    "onCommand:ncat.sendPrivateMessage",
+    "onCommand:ncat.sendGroupMessage",
+    "onCommand:ncat.showLogs",
+    "onView:ncat.sidebarView"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ncat.connect",
+        "title": "NCat: Connect"
+      },
+      {
+        "command": "ncat.disconnect",
+        "title": "NCat: Disconnect"
+      },
+      {
+        "command": "ncat.bossKey",
+        "title": "NCat: Boss Key (Go Explorer)"
+      },
+      {
+        "command": "ncat.startBackend",
+        "title": "NCat: Start Backend"
+      },
+      {
+        "command": "ncat.sendPrivateMessage",
+        "title": "NCat: Send Private Message"
+      },
+      {
+        "command": "ncat.sendGroupMessage",
+        "title": "NCat: Send Group Message"
+      },
+      {
+        "command": "ncat.showLogs",
+        "title": "NCat: Show Logs"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ncat",
+          "title": "NCat",
+          "icon": "media/ncat.svg"
+        }
+      ]
+    },
+    "views": {
+      "ncat": [
+        {
+          "type": "webview",
+          "id": "ncat.sidebarView",
+          "name": "Chats"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "NCat",
+      "properties": {
+        "ncat.wsUrl": {
+          "type": "string",
+          "default": "ws://127.0.0.1:3001",
+          "description": "NCat OneBot WebSocket server URL."
+        },
+        "ncat.rootDir": {
+          "type": "string",
+          "default": "",
+          "description": "NCat root directory. Supports absolute path or workspace-relative path."
+        },
+        "ncat.quickLoginUin": {
+          "type": "string",
+          "default": "",
+          "description": "Optional QQ UIN for quick login on Windows. If set, extension starts NapCatWinBootMain.exe <uin> first."
+        },
+        "ncat.token": {
+          "type": "string",
+          "default": "",
+          "description": "NCat OneBot access token."
+        },
+        "ncat.tokenFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional token file path. If set, token auto-read tries this file first."
+        },
+        "ncat.tokenEnvVar": {
+          "type": "string",
+          "default": "NCAT_TOKEN",
+          "description": "Environment variable name used when ncat.token is empty."
+        },
+        "ncat.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto connect when VS Code starts."
+        },
+        "ncat.autoReconnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reconnect automatically after unexpected disconnection."
+        },
+        "ncat.maxMessagesPerChat": {
+          "type": "number",
+          "default": 500,
+          "minimum": 50,
+          "maximum": 2000,
+          "description": "Maximum number of cached messages for each chat in sidebar."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "ncat.bossKey",
+        "key": "ctrl+q",
+        "mac": "cmd+;"
+      }
+    ]
+  },
+  "scripts": {
+    "smoke": "node scripts/napcat-smoke.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "check": "node scripts/doctor.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

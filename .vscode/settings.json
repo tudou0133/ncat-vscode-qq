@@ -1,0 +1,8 @@
+{
+  "ncat.wsUrl": "ws://127.0.0.1:3001",
+  "ncat.token": "",
+  "ncat.tokenEnvVar": "NCAT_TOKEN",
+  "ncat.autoConnect": true,
+  "ncat.autoReconnect": true,
+  "ncat.maxMessagesPerChat": 500
+}
