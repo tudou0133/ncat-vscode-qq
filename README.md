@@ -106,6 +106,8 @@
 
 - `NCat 根目录`：填 `NCat.xxxxx.Shell` 目录  
   示例：`D:\ncat\NCat.44498.Shell`
+- `WS token` ：填上面在webui里设置的WS token
+  示例：`test1234`
 - `快速登录 QQ 号`：填你首次扫码登录过的 QQ 号（纯数字）
 
 填写后会自动保存。
