@@ -16,12 +16,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/tudou0133/napcat-vscode-qq.git"
+    "url": "https://github.com/tudou0133/ncat-vscode-qq.git"
   },
   "bugs": {
-    "url": "https://github.com/tudou0133/napcat-vscode-qq/issues"
+    "url": "https://github.com/tudou0133/ncat-vscode-qq/issues"
   },
-  "homepage": "https://github.com/tudou0133/napcat-vscode-qq/blob/main/README.md",
+  "homepage": "https://github.com/tudou0133/ncat-vscode-qq/blob/main/README.md",
   "icon": "images/icon.png",
   "categories": [
     "Other"
