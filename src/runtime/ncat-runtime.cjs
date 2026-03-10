@@ -306,6 +306,60 @@ function inferImageMimeFromBuffer(buffer) {
 
 function fileExtForMime(mime) {
   const value = String(mime || '').toLowerCase().trim();
+  if (value === 'application/zip' || value === 'application/x-zip-compressed') {
+    return 'zip';
+  }
+  if (value === 'application/x-7z-compressed') {
+    return '7z';
+  }
+  if (value === 'application/x-rar-compressed' || value === 'application/vnd.rar') {
+    return 'rar';
+  }
+  if (value === 'application/x-tar') {
+    return 'tar';
+  }
+  if (value === 'application/gzip' || value === 'application/x-gzip') {
+    return 'gz';
+  }
+  if (value === 'application/pdf') {
+    return 'pdf';
+  }
+  if (value === 'text/plain') {
+    return 'txt';
+  }
+  if (value === 'text/csv') {
+    return 'csv';
+  }
+  if (value === 'application/json' || value === 'text/json') {
+    return 'json';
+  }
+  if (value === 'application/msword') {
+    return 'doc';
+  }
+  if (value === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    return 'docx';
+  }
+  if (value === 'application/vnd.ms-excel') {
+    return 'xls';
+  }
+  if (value === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+    return 'xlsx';
+  }
+  if (value === 'application/vnd.ms-powerpoint') {
+    return 'ppt';
+  }
+  if (value === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+    return 'pptx';
+  }
+  if (value === 'audio/mpeg') {
+    return 'mp3';
+  }
+  if (value === 'audio/wav' || value === 'audio/x-wav') {
+    return 'wav';
+  }
+  if (value === 'video/mp4') {
+    return 'mp4';
+  }
   if (value === 'image/png') {
     return 'png';
   }
@@ -356,6 +410,51 @@ function sanitizeDownloadFileName(value, fallback = 'file') {
   return cleaned.slice(0, 128);
 }
 
+function parseDownloadFileNameParts(fileName) {
+  const raw = sanitizeDownloadFileName(fileName, '').trim();
+  if (!raw) {
+    return {
+      stem: '',
+      ext: '',
+      hasExt: false,
+    };
+  }
+  const parsed = path.parse(raw);
+  const ext = String(parsed.ext || '').trim().replace(/^\./, '').toLowerCase();
+  return {
+    stem: sanitizeDownloadFileName(parsed.name || raw, 'file'),
+    ext,
+    hasExt: !!ext,
+  };
+}
+
+function fileExtForDownloadMime(mime) {
+  const value = String(mime || '').toLowerCase().trim();
+  if (!value || value === 'application/octet-stream') {
+    return '';
+  }
+  const ext = fileExtForMime(value);
+  if (!ext) {
+    return '';
+  }
+  if (ext === 'png' && value !== 'image/png') {
+    return '';
+  }
+  return ext;
+}
+
+function ensureDownloadFileNameExt(fileName, mime) {
+  const parts = parseDownloadFileNameParts(fileName);
+  if (!parts.stem) {
+    return sanitizeDownloadFileName(fileName, 'file');
+  }
+  if (parts.hasExt) {
+    return `${parts.stem}.${parts.ext}`;
+  }
+  const inferredExt = fileExtForDownloadMime(mime);
+  return inferredExt ? `${parts.stem}.${inferredExt}` : parts.stem;
+}
+
 function buildDownloadFileNameFromUrl(rawUrl, fallback = 'file') {
   try {
     const parsed = new URL(String(rawUrl || ''));
@@ -365,6 +464,35 @@ function buildDownloadFileNameFromUrl(rawUrl, fallback = 'file') {
   } catch {
     return sanitizeDownloadFileName(fallback, 'file');
   }
+}
+
+function parseContentDispositionFileName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const utf8Match = raw.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')?([^;]+)/i);
+  if (utf8Match && utf8Match[1]) {
+    const encoded = String(utf8Match[1] || '').trim().replace(/^["']|["']$/g, '');
+    try {
+      return sanitizeDownloadFileName(decodeURIComponent(encoded), '');
+    } catch {
+      return sanitizeDownloadFileName(encoded, '');
+    }
+  }
+
+  const quotedMatch = raw.match(/filename\s*=\s*"([^"]+)"/i);
+  if (quotedMatch && quotedMatch[1]) {
+    return sanitizeDownloadFileName(quotedMatch[1], '');
+  }
+
+  const plainMatch = raw.match(/filename\s*=\s*([^;]+)/i);
+  if (plainMatch && plainMatch[1]) {
+    return sanitizeDownloadFileName(plainMatch[1].replace(/^["']|["']$/g, ''), '');
+  }
+
+  return '';
 }
 
 function ensureUniqueFilePath(dir, fileName) {
@@ -407,6 +535,15 @@ function buildBackendGrayTipText(items) {
     }
   }
   return parts.join('').trim();
+}
+
+function applyRedPacketGrayTipContext(text, senderName = '') {
+  const raw = String(text || '').trim();
+  const sender = String(senderName || '').trim();
+  if (!raw || !sender) {
+    return raw;
+  }
+  return raw.replace(/^有人的红包/, `${sender}的红包`);
 }
 
 function parseBackendGrayTipLine(line) {
@@ -1088,6 +1225,7 @@ class NCatRuntime {
     this.backendManualMode = false;
     this.backendLastWsReadyAt = 0;
     this.backendUnsupportedHints = new Map();
+    this.recentRedPacketByChat = new Map();
     this.mediaRetryNoRetryIds = new Set();
     this.detectedBackendWebUrl = '';
     this.detectedBackendWebToken = '';
@@ -2714,6 +2852,7 @@ class NCatRuntime {
     this.groupMembersLoading.clear();
     this.pendingNameLookups.clear();
     this.backendUnsupportedHints.clear();
+    this.recentRedPacketByChat.clear();
     this.mediaRetryNoRetryIds.clear();
     this.historyLoadedForConnection = true;
     this.recentOutgoingPokes = [];
@@ -2992,7 +3131,13 @@ class NCatRuntime {
       backendManagedActive: Boolean(this.backendManagedActive),
       backendManualMode: Boolean(this.backendManualMode),
       backendLastLaunchFile: String(this.backendLastLaunchFile || ''),
+      rawWsLogEnabled: Boolean(config.get('ncat.rawWsLogEnabled', false)),
     };
+  }
+
+  isRawWsLogEnabled() {
+    const config = vscode.workspace.getConfiguration();
+    return Boolean(config.get('ncat.rawWsLogEnabled', false));
   }
 
   refreshDetectedBackendWebInfo(config, rootDir = '') {
@@ -3144,6 +3289,9 @@ class NCatRuntime {
       }
     }
     this.log(`backend unsupported hint: chat=${chatId}, elementType=${elementType}`);
+    if (this.isRawWsLogEnabled()) {
+      this.log(`raw backend unsupported: ${raw}`);
+    }
   }
 
   consumeBackendUnsupportedHint(chatId, maxAgeMs = 12_000) {
@@ -3168,6 +3316,9 @@ class NCatRuntime {
     if (!parsed) {
       return false;
     }
+    if (this.isRawWsLogEnabled()) {
+      this.log(`raw backend gray tip: ${String(line || '').trim()}`);
+    }
     const chatId = String(parsed.chatId || '').trim();
     const groupId = String(parsed.groupId || '').trim();
     const text = String(parsed.text || '').trim();
@@ -3178,6 +3329,11 @@ class NCatRuntime {
     const session = this.chatSessions.get(chatId);
     const ts = Date.now();
     const title = String(session?.title || `群 ${groupId}`);
+    const recentRedPacket = this.recentRedPacketByChat.get(chatId);
+    const recentSenderName = Number(recentRedPacket?.at || 0) > 0 && (ts - Number(recentRedPacket.at || 0)) <= 5 * 60_000
+      ? String(recentRedPacket.senderName || '').trim()
+      : '';
+    const displayText = applyRedPacketGrayTipContext(text, recentSenderName);
     const messageId = `gray-tip:${groupId}:${ts}:${text.slice(0, 24)}`;
     const appended = this.appendMessageToSession({
       chatId,
@@ -3191,7 +3347,7 @@ class NCatRuntime {
       senderAvatarUrl: '',
       segments: [{
         type: 'text',
-        text,
+        text: displayText,
       }],
       timestamp: ts,
       messageId,
@@ -3200,7 +3356,7 @@ class NCatRuntime {
       countUnread: true,
     });
     if (appended) {
-      this.log(`backend gray tip ingested: chat=${chatId}, text=${text}`);
+      this.log(`backend gray tip ingested: chat=${chatId}, text=${displayText}`);
     }
     return appended;
   }
@@ -3446,13 +3602,14 @@ class NCatRuntime {
     const avatarUrl = isGroup ? getGroupAvatarUrl(targetId) : getPrivateAvatarUrl(targetId);
 
     const chatId = `${messageType}:${targetId}`;
-    const segments = await this.decorateSegmentsForDisplay(normalizeSegments(payload), {
+    const rawMsg = String(payload?.raw_message || payload?.rawMessage || '').trim();
+    const normalizedSegments = normalizeSegments(payload);
+    const segments = await this.decorateSegmentsForDisplay(normalizedSegments, {
       chatType: messageType,
       targetId,
       chatId,
     });
     if (segments.length === 0) {
-      const rawMsg = String(payload?.raw_message || payload?.rawMessage || '').trim();
       const debugType = Array.isArray(payload?.message)
         ? payload.message
             .map((seg) => String(seg?.type || seg?.data?.type || seg?.elementType || seg?.data?.elementType || '?'))
@@ -3470,8 +3627,20 @@ class NCatRuntime {
           title: '红包',
           text: '[红包]',
         });
+        this.recentRedPacketByChat.set(chatId, {
+          senderId,
+          senderName,
+          at: Date.now(),
+        });
         this.log(`incoming message fallback -> red_packet: chat=${chatId}, by=${hasElement9 ? 'payload' : 'backend-hint'}`);
       }
+    }
+    if (segments.some((seg) => seg && seg.type === 'red_packet')) {
+      this.recentRedPacketByChat.set(chatId, {
+        senderId,
+        senderName,
+        at: Date.now(),
+      });
     }
     if (segments.length === 0) {
       segments.push({
@@ -3888,9 +4057,12 @@ class NCatRuntime {
         throw new Error('empty response body');
       }
 
+      const headerFileName = parseContentDispositionFileName(response.headers.get('content-disposition') || '');
+      const headerMime = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
       const suggestedName = sanitizeDownloadFileName(preferredName || '', '');
       const fallbackName = buildDownloadFileNameFromUrl(normalized, 'file');
-      const finalName = suggestedName || fallbackName;
+      const baseName = headerFileName || suggestedName || fallbackName;
+      const finalName = ensureDownloadFileNameExt(baseName, headerMime);
       filePath = ensureUniqueFilePath(targetDir, finalName);
 
       let writtenBytes = 0;
@@ -5043,7 +5215,11 @@ class NCatRuntime {
 
   handleMessage(raw) {
     try {
-      const payload = JSON.parse(raw.toString());
+      const rawText = raw.toString();
+      const payload = JSON.parse(rawText);
+      if (this.isRawWsLogEnabled()) {
+        this.log(`raw ws <- ${clipText(rawText, 1800)}`);
+      }
 
       if (typeof payload.echo === 'string' && this.pendingRequests.has(payload.echo)) {
         const pending = this.pendingRequests.get(payload.echo);

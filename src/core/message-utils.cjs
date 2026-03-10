@@ -221,6 +221,147 @@ function inferFileNameFromUrl(value) {
   }
 }
 
+function splitFileBaseAndExt(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return {
+      base: '',
+      ext: '',
+    };
+  }
+  const match = raw.match(/^(.*?)(\.([A-Za-z0-9]{1,16}))$/);
+  if (!match) {
+    return {
+      base: raw,
+      ext: '',
+    };
+  }
+  return {
+    base: String(match[1] || '').trim(),
+    ext: String(match[3] || '').trim().toLowerCase(),
+  };
+}
+
+function normalizeFileExt(value) {
+  const raw = String(value || '')
+    .trim()
+    .replace(/^[.]+/, '')
+    .replace(/[^A-Za-z0-9]+/g, '')
+    .toLowerCase();
+  if (!raw) {
+    return '';
+  }
+  if (raw.length > 16) {
+    return '';
+  }
+  return raw;
+}
+
+function ensureFileNameWithExt(name, ext) {
+  const fileName = String(name || '').trim();
+  const normalizedExt = normalizeFileExt(ext);
+  if (!fileName || !normalizedExt) {
+    return fileName;
+  }
+  const parsed = splitFileBaseAndExt(fileName);
+  if (parsed.ext) {
+    return fileName;
+  }
+  return `${parsed.base || fileName}.${normalizedExt}`;
+}
+
+function looksLikeOpaqueFileToken(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return true;
+  }
+  if (/\.[A-Za-z0-9]{1,16}$/.test(raw)) {
+    return false;
+  }
+  if (/[\u4e00-\u9fa5\s@()[\]{}-]/.test(raw)) {
+    return false;
+  }
+  if (/^[a-f0-9]{16,}$/i.test(raw)) {
+    return true;
+  }
+  if (/^[A-Za-z0-9_-]{24,}$/.test(raw)) {
+    return true;
+  }
+  return false;
+}
+
+function isGenericFileLabel(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return raw === '文件' || raw === 'file' || raw === '附件' || raw === '[文件]';
+}
+
+function normalizeDisplayedFileName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  const bracketMatch = raw.match(/^\[文件\s+(.+?)\]$/);
+  if (bracketMatch && bracketMatch[1]) {
+    return String(bracketMatch[1] || '').trim();
+  }
+  return raw;
+}
+
+function extractFileNameFromRawMessage(rawMessage) {
+  const raw = String(rawMessage || '').trim();
+  if (!raw) {
+    return '';
+  }
+  const match = raw.match(/\[文件\s+([^\]]+?)\]/);
+  if (!match || !match[1]) {
+    return '';
+  }
+  return normalizeDisplayedFileName(match[1]);
+}
+
+function pickBestFileName(source, inferredName, fallbackType) {
+  const candidates = [
+    source.file,
+    source.file_name,
+    source.filename,
+    source.fileName,
+    source.file_name_text,
+    source.fileNameText,
+    source.file_title,
+    source.fileTitle,
+    source.title,
+    source.display_name,
+    source.displayName,
+    source.name,
+    source.text,
+    source.summary,
+    inferredName,
+    fallbackType,
+    '文件',
+  ];
+
+  let fallbackCandidate = '';
+  for (const item of candidates) {
+    const text = normalizeDisplayedFileName(item);
+    if (!text) {
+      continue;
+    }
+    if (!fallbackCandidate && !isGenericFileLabel(text)) {
+      fallbackCandidate = text;
+    }
+    if (isGenericFileLabel(text)) {
+      continue;
+    }
+    if (!looksLikeOpaqueFileToken(text)) {
+      return text;
+    }
+  }
+  return fallbackCandidate || fallbackType || '文件';
+}
+
 function parseFileSize(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -258,16 +399,16 @@ function toFileSegment(data = {}, fallbackType = '文件') {
     ''
   );
   const inferredName = inferFileNameFromUrl(url);
-  const name = String(
-    source.name ||
-    source.file_name ||
-    source.filename ||
-    source.fileName ||
-    source.title ||
-    inferredName ||
-    fallbackType ||
-    '文件'
-  ).trim() || (fallbackType || '文件');
+  const hintedExt = normalizeFileExt(
+    source.file_ext ||
+    source.fileExt ||
+    source.ext ||
+    source.suffix ||
+    source.extension ||
+    ''
+  );
+  const rawName = pickBestFileName(source, inferredName, fallbackType);
+  const name = ensureFileNameWithExt(rawName, hintedExt);
   const size = parseFileSize(
     source.size ||
     source.file_size ||
@@ -592,6 +733,8 @@ function parseRawMessage(rawMessage) {
 }
 
 function normalizeSegments(payload) {
+  const rawMessage = String(payload?.raw_message || payload?.rawMessage || payload?.message || '');
+  const rawFileName = extractFileNameFromRawMessage(rawMessage);
   if (Array.isArray(payload?.message)) {
     const out = [];
     for (const seg of payload.message) {
@@ -621,7 +764,11 @@ function normalizeSegments(payload) {
           label: String(seg?.data?.summary || seg?.data?.file || 'video'),
         });
       } else if (segType === 'file' || segType === 'document' || segType === 'attachment') {
-        out.push(toFileSegment(seg?.data || seg, '文件'));
+        out.push(toFileSegment({
+          ...(seg && typeof seg === 'object' ? seg : {}),
+          ...(seg?.data && typeof seg.data === 'object' ? seg.data : {}),
+          file_name_text: rawFileName,
+        }, '文件'));
       } else if (segType === 'face') {
         out.push(
           toFaceSegment(
@@ -700,7 +847,6 @@ function normalizeSegments(payload) {
     return [toRedPacketSegment(payload?.data || payload || {}, '红包')];
   }
 
-  const rawMessage = String(payload?.raw_message || payload?.rawMessage || payload?.message || '');
   return parseRawMessage(rawMessage);
 }
 

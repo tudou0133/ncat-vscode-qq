@@ -337,6 +337,16 @@ class NCatSidebarProvider {
           }
           return;
         }
+        if (action === 'setRawWsLog') {
+          const enabled = !!msg.enabled;
+          const config = vscode.workspace.getConfiguration();
+          const hasWorkspace = Array.isArray(vscode.workspace.workspaceFolders) && vscode.workspace.workspaceFolders.length > 0;
+          const target = hasWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+          await config.update('ncat.rawWsLogEnabled', enabled, target);
+          this.runtime.log(`Raw WS log setting updated: enabled=${enabled}`);
+          this.pushState();
+          return;
+        }
         if (action === 'clearCache') {
           this.runtime.clearChatCache();
           this.selectedChatId = '';

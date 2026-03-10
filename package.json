@@ -2,7 +2,7 @@
   "name": "ncat-vscode-qq",
   "displayName": "NCat-VSC-QQ",
   "description": "NCat QQ extension for VS Code.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "main": "./src/extension.cjs",
@@ -127,6 +127,11 @@
           "type": "boolean",
           "default": true,
           "description": "Reconnect automatically after unexpected disconnection."
+        },
+        "ncat.rawWsLogEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable raw incoming WebSocket logs for debugging."
         },
         "ncat.maxMessagesPerChat": {
           "type": "number",

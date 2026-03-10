@@ -64,6 +64,7 @@ function renderSettingsScript() {
       const imageToggle = document.getElementById('settingPreviewImages');
       const videoToggle = document.getElementById('settingPreviewVideos');
       const enterToggle = document.getElementById('settingEnterToSend');
+      const rawWsLogToggle = document.getElementById('settingRawWsLogEnabled');
       const rootDirInput = document.getElementById('settingRootDir');
       const tokenFileInput = document.getElementById('settingTokenFile');
       const quickLoginUinInput = document.getElementById('settingQuickLoginUin');
@@ -83,6 +84,9 @@ function renderSettingsScript() {
       }
       if (enterToggle) {
         enterToggle.checked = !!uiPrefs.enterToSend;
+      }
+      if (rawWsLogToggle) {
+        rawWsLogToggle.checked = !!state?.backend?.rawWsLogEnabled;
       }
       if (rootDirInput && document.activeElement !== rootDirInput) {
         rootDirInput.value = String(state?.backend?.rootDir || '');
@@ -251,6 +255,14 @@ function renderSettingsScript() {
 
       document.getElementById('settingEnterToSend').addEventListener('change', (event) => {
         applyUiPref('enterToSend', !!event.target.checked);
+      });
+
+      document.getElementById('settingRawWsLogEnabled').addEventListener('change', (event) => {
+        vscode.postMessage({
+          type: 'settingsAction',
+          action: 'setRawWsLog',
+          enabled: !!event.target.checked,
+        });
       });
 
       document.getElementById('settingClearCache').addEventListener('click', () => {
