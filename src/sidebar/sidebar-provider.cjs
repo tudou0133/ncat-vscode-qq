@@ -1141,20 +1141,35 @@ class NCatSidebarProvider {
     });
   }
 
-  ensureGroupMembersForChat(chatId) {
+  async ensureGroupMembersForChat(chatId) {
     const full = String(chatId || '').trim();
+    if (!full) {
+      return;
+    }
+
     const splitAt = full.indexOf(':');
     if (splitAt <= 0 || splitAt === full.length - 1) {
       return;
     }
     const chatType = full.slice(0, splitAt);
     const targetId = full.slice(splitAt + 1);
-    if (chatType !== 'group' || !targetId) {
+
+    if (chatType === 'group' && targetId) {
+      try {
+        await this.runtime.ensureGroupMembers(targetId, false);
+      } catch (error) {
+        this.runtime.log(`ensureGroupMembersForChat failed: chat=${full}, reason=${error?.message || String(error)}`);
+      }
+    }
+
+    try {
+      await this.runtime.refreshChatSenderNames(full, {
+        reason: 'sidebar-open-chat',
+      });
+    } catch (error) {
+      this.runtime.log(`refreshChatSenderNames failed: chat=${full}, reason=${error?.message || String(error)}`);
       return;
     }
-    this.runtime.ensureGroupMembers(targetId, false).catch((error) => {
-      this.runtime.log(`ensureGroupMembersForChat failed: group_id=${targetId}, reason=${error?.message || String(error)}`);
-    });
   }
 
   async saveBackendSettings(msg) {

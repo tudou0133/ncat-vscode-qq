@@ -566,7 +566,7 @@ function resolveDisplayNameOrId(runtime, userId, groupId = '') {
     return '';
   }
   if (uid === String(runtime.selfUserId || '').trim()) {
-    return String(runtime.selfNickname || '你');
+    return runtime.getDisplayName(uid, groupId) || runtime.getDisplayName(uid) || String(runtime.selfNickname || '你');
   }
   return runtime.getDisplayName(uid, groupId) || runtime.getDisplayName(uid) || `QQ ${uid}`;
 }
@@ -2277,6 +2277,123 @@ class NCatRuntime {
     return resolveDisplayName(this, userId, groupId);
   }
 
+  getSelfDisplayName(groupId = '') {
+    const selfId = String(this.selfUserId || '').trim();
+    if (!selfId) {
+      return String(this.selfNickname || '你');
+    }
+    return this.getDisplayName(selfId, groupId) || this.getDisplayName(selfId) || String(this.selfNickname || '你');
+  }
+
+  async refreshChatSenderNames(chatId, options = {}) {
+    const fullId = String(chatId || '').trim();
+    const session = this.chatSessions.get(fullId);
+    if (!session || !Array.isArray(session.messages) || session.messages.length === 0) {
+      return {
+        ok: false,
+        updated: 0,
+        reason: 'chat not found or empty',
+      };
+    }
+
+    const splitAt = fullId.indexOf(':');
+    const chatType = splitAt > 0 ? fullId.slice(0, splitAt) : '';
+    const targetId = splitAt > 0 ? fullId.slice(splitAt + 1) : '';
+    const isGroup = chatType === 'group' && !!targetId;
+    const canLookup = this.isConnected();
+    const resolvedNames = new Map();
+    let updated = 0;
+
+    const needsRefresh = (userId, currentName) => {
+      const current = String(currentName || '').trim();
+      if (!current) {
+        return true;
+      }
+      if (current.toLowerCase() === 'unknown') {
+        return true;
+      }
+      if (current === userId || current === `QQ ${userId}`) {
+        return true;
+      }
+      if (isGroup && userId === String(this.selfUserId || '').trim() && current === String(this.selfNickname || '').trim()) {
+        return true;
+      }
+      return false;
+    };
+
+    const getResolvedName = async (userId) => {
+      const uid = String(userId || '').trim();
+      if (!uid) {
+        return '';
+      }
+      if (resolvedNames.has(uid)) {
+        return resolvedNames.get(uid);
+      }
+
+      let resolved = '';
+      if (uid === String(this.selfUserId || '').trim()) {
+        resolved = this.getSelfDisplayName(isGroup ? targetId : '');
+      } else {
+        resolved = this.getDisplayName(uid, isGroup ? targetId : '') || this.getDisplayName(uid);
+      }
+
+      if (!resolved && canLookup) {
+        resolved = await this.resolveDisplayName(uid, isGroup ? targetId : '');
+      }
+
+      resolved = String(resolved || '').trim();
+      resolvedNames.set(uid, resolved);
+      return resolved;
+    };
+
+    for (const msg of session.messages) {
+      const senderId = String(msg?.senderId || '').trim();
+      if (!senderId) {
+        continue;
+      }
+      if (!needsRefresh(senderId, msg.senderName)) {
+        continue;
+      }
+      const nextName = await getResolvedName(senderId);
+      if (!nextName || nextName === String(msg.senderName || '').trim()) {
+        continue;
+      }
+      msg.senderName = nextName;
+      updated += 1;
+    }
+
+    for (const msg of session.messages) {
+      const segments = Array.isArray(msg?.segments) ? msg.segments : [];
+      for (const seg of segments) {
+        if (!seg || seg.type !== 'reply') {
+          continue;
+        }
+        const replyId = String(seg.replyId || '').trim();
+        if (!replyId || !session.messageIdIndex?.has(replyId)) {
+          continue;
+        }
+        const refMsg = session.messageIdIndex.get(replyId);
+        const refName = String(refMsg?.senderName || refMsg?.senderId || '').trim();
+        if (!refName || refName === String(seg.replyName || '').trim()) {
+          continue;
+        }
+        seg.replyName = refName;
+        updated += 1;
+      }
+    }
+
+    if (updated > 0) {
+      this.emitUiUpdate();
+      this.schedulePersistCache();
+      this.log(`Chat sender names refreshed: chat=${fullId}, updated=${updated}, reason=${String(options.reason || 'manual')}`);
+    }
+
+    return {
+      ok: true,
+      updated,
+    };
+  }
+
   getHistoryCutoff() {
     return Date.now() - HISTORY_RETENTION_MS;
   }
@@ -3174,7 +3291,7 @@ class NCatRuntime {
       avatarUrl: getGroupAvatarUrl(targetId),
       direction: 'out',
       senderId: this.selfUserId || '',
-      senderName: this.selfNickname || 'Me',
+      senderName: this.getSelfDisplayName(targetId),
       senderAvatarUrl: this.selfUserId ? getPrivateAvatarUrl(this.selfUserId) : '',
       segments: displaySegments,
       timestamp: Date.now(),
@@ -3792,7 +3909,7 @@ class NCatRuntime {
       avatarUrl,
       direction: 'out',
       senderId: this.selfUserId || '',
-      senderName: this.selfNickname || 'Me',
+      senderName: chatType === 'group' ? this.getSelfDisplayName(targetId) : (this.selfNickname || 'Me'),
       senderAvatarUrl: this.selfUserId ? getPrivateAvatarUrl(this.selfUserId) : '',
       segments: displaySegments,
       timestamp: Date.now(),
@@ -3805,7 +3922,8 @@ class NCatRuntime {
   }
 
   applyLocalRecall(chatId, rawMessageId, localMessageId = '') {
-    const session = this.chatSessions.get(String(chatId || '').trim());
+    const fullId = String(chatId || '').trim();
+    const session = this.chatSessions.get(fullId);
     if (!session) {
       return false;
     }
@@ -3835,9 +3953,7 @@ class NCatRuntime {
     if (this.selfUserId) {
       target.senderId = String(this.selfUserId);
     }
-    if (this.selfNickname) {
-      target.senderName = String(this.selfNickname);
-    }
+    target.senderName = fullId.startsWith('group:') ? this.getSelfDisplayName(fullId.slice(6)) : String(this.selfNickname || target.senderName || '');
     target.senderAvatarUrl = this.selfUserId ? getPrivateAvatarUrl(this.selfUserId) : String(target.senderAvatarUrl || '');
 
     this.pruneSessionMessages(session);
@@ -3887,7 +4003,7 @@ class NCatRuntime {
     const pokeId = String(pokeTargetId || '').trim();
     const groupId = type === 'group' ? targetId : '';
     const display = pokeId ? this.getDisplayName(pokeId, groupId) : '';
-    const actorName = String(this.selfNickname || '你');
+    const actorName = type === 'group' ? this.getSelfDisplayName(groupId) : String(this.selfNickname || '你');
     const targetName = pokeId ? (display || `QQ ${pokeId}`) : '某人';
     this.recordOutgoingPoke(type, targetId, String(this.selfUserId || ''), pokeId);
     const segments = [{
@@ -3905,7 +4021,7 @@ class NCatRuntime {
       avatarUrl: type === 'group' ? getGroupAvatarUrl(targetId) : getPrivateAvatarUrl(targetId),
       direction: 'out',
       senderId: this.selfUserId || '',
-      senderName: this.selfNickname || 'Me',
+      senderName: type === 'group' ? this.getSelfDisplayName(targetId) : (this.selfNickname || 'Me'),
       senderAvatarUrl: this.selfUserId ? getPrivateAvatarUrl(this.selfUserId) : '',
       segments,
       timestamp: Date.now(),
