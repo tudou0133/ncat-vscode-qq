@@ -153,7 +153,11 @@ class NCatSidebarProvider {
       }
 
       if (msg.type === 'selectChat') {
+        const previousChatId = this.selectedChatId;
         const chatId = String(msg.chatId || '');
+        if (previousChatId) {
+          this.runtime.markChatRead(previousChatId);
+        }
         this.selectedChatId = chatId;
         if (chatId) {
           this.runtime.markChatRead(chatId);
@@ -1133,6 +1137,9 @@ class NCatSidebarProvider {
       return;
     }
 
+    if (this.selectedChatId) {
+      this.runtime.markChatRead(this.selectedChatId);
+    }
     const nextState = this.runtime.getUiState(this.selectedChatId, this.searchQuery);
     this.selectedChatId = nextState.selectedChatId;
     this.view.webview.postMessage({

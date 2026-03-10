@@ -805,6 +805,117 @@ function formatReplyLabel(replyId, refName, refPreview) {
   return replyId ? `[回复 #${replyId}]` : '[回复]';
 }
 
+function buildReplyRenderableSegments(segments) {
+  const input = Array.isArray(segments) ? segments : [];
+  const out = [];
+  const MAX_SEGMENTS = 8;
+
+  for (const seg of input) {
+    if (!seg || typeof seg !== 'object') {
+      continue;
+    }
+    if (out.length >= MAX_SEGMENTS) {
+      break;
+    }
+
+    const type = String(seg.type || '').trim();
+    if (!type) {
+      continue;
+    }
+
+    if (type === 'image') {
+      out.push({
+        type: 'image',
+        url: String(seg.url || '').trim(),
+        label: String(seg.label || 'image').trim() || 'image',
+      });
+      continue;
+    }
+
+    if (type === 'video') {
+      out.push({
+        type: 'video',
+        url: String(seg.url || '').trim(),
+        coverUrl: String(seg.coverUrl || '').trim(),
+        label: String(seg.label || 'video').trim() || 'video',
+      });
+      continue;
+    }
+
+    if (type === 'text') {
+      const text = String(seg.text || '').trim();
+      if (text) {
+        out.push({
+          type: 'text',
+          text,
+        });
+      }
+      continue;
+    }
+
+    if (type === 'mention') {
+      out.push({
+        type: 'mention',
+        text: String(seg.text || '@某人').trim() || '@某人',
+      });
+      continue;
+    }
+
+    if (type === 'face') {
+      out.push({
+        type: 'face',
+        text: String(seg.text || '🙂').trim() || '🙂',
+        label: String(seg.label || '表情').trim() || '表情',
+      });
+      continue;
+    }
+
+    if (type === 'json') {
+      const text = String(seg.title || seg.summary || seg.text || '[JSON消息]').trim();
+      out.push({
+        type: 'text',
+        text: text || '[JSON消息]',
+      });
+      continue;
+    }
+
+    if (type === 'red_packet') {
+      const text = String(seg.text || seg.title || '[红包]').trim();
+      out.push({
+        type: 'text',
+        text: text || '[红包]',
+      });
+      continue;
+    }
+
+    if (type === 'forward') {
+      out.push({
+        type: 'text',
+        text: String(seg.text || '[合并转发]').trim() || '[合并转发]',
+      });
+      continue;
+    }
+
+    if (type === 'reply') {
+      out.push({
+        type: 'text',
+        text: String(seg.text || '[回复]').trim() || '[回复]',
+      });
+      continue;
+    }
+
+    const fallback = String(seg.text || `[${type}]`).trim();
+    if (fallback) {
+      out.push({
+        type: 'text',
+        text: fallback,
+      });
+    }
+  }
+
+  return out;
+}
+
 class NCatRuntime {
   constructor(context) {
     this.context = context;
@@ -3442,6 +3553,23 @@ class NCatRuntime {
       this.statusBar.text = '$(error) NCat: Error';
       this.statusBar.tooltip = String(error?.message || error);
       this.log(`WebSocket error: ${error?.message || String(error)}`);
+      const errorCode = String(error?.code || '').trim().toUpperCase();
+      const errorMessage = String(error?.message || error || '');
+      const inBackendBootGrace =
+        !this.backendManualMode &&
+        this.backendLastLaunchAt > 0 &&
+        (Date.now() - this.backendLastLaunchAt) < 10_000;
+      const shouldSuppressBootRefusedNotice =
+        !silent &&
+        inBackendBootGrace &&
+        errorCode === 'ECONNREFUSED' &&
+        errorMessage.includes('127.0.0.1:3001');
+
+      if (shouldSuppressBootRefusedNotice) {
+        this.log(`Suppress startup connect error notice during backend boot: ${errorMessage}`);
+        return;
+      }
+
       if (!silent) {
         vscode.window.showErrorMessage(`NCat connection failed: ${error?.message || 'unknown error'}`);
       }
@@ -4177,15 +4305,14 @@ class NCatRuntime {
     const ownerName = ownerId ? resolveDisplayNameOrId(this, ownerId, recall.groupId || '') : '';
 
     let recalledPreview = '';
+    let recalledSegments = [];
     if (recall.messageId && session?.messageIdIndex?.has(recall.messageId)) {
       const ref = session.messageIdIndex.get(recall.messageId);
-      recalledPreview = sanitizeReplyPreviewText(buildReplyPreviewFromSegments(Array.isArray(ref?.segments) ? ref.segments : []));
+      recalledSegments = Array.isArray(ref?.segments) ? ref.segments : [];
+      recalledPreview = sanitizeReplyPreviewText(buildReplyPreviewFromSegments(recalledSegments));
     }
 
-    let text = `${actorName || '有人'} 尝试撤回一条消息`;
-    if (recall.isGroup && ownerName && ownerName !== actorName) {
-      text = `${actorName || '有人'} 尝试撤回 ${ownerName} 的一条消息`;
-    }
+    const text = '尝试撤回一条消息';
     const recallSegments = [{
       type: 'recall_notice',
       actorId,
@@ -4197,9 +4324,10 @@ class NCatRuntime {
       recallSegments.push({
         type: 'reply',
         replyId: String(recall.messageId || ''),
-        replyName: ownerName,
+        replyName: '',
         replyPreview: recalledPreview,
-        text: formatReplyLabel(String(recall.messageId || ''), ownerName, recalledPreview),
+        replySegments: buildReplyRenderableSegments(recalledSegments),
+        text: formatReplyLabel(String(recall.messageId || ''), '', recalledPreview),
       });
     }
 
