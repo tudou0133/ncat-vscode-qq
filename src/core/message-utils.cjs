@@ -196,6 +196,100 @@ function extractFirstHttpUrlFromText(text) {
   return nonImage || normalized[0];
 }
 
+function normalizeMaybeHttpUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  if (/^https?:\/\//i.test(raw) || /^\/\//.test(raw) || /^[a-z0-9.-]+\.[a-z]{2,}(?:\/|$)/i.test(raw)) {
+    return normalizeHttpUrl(raw);
+  }
+  return '';
+}
+
+function inferFileNameFromUrl(value) {
+  const normalized = normalizeMaybeHttpUrl(value);
+  if (!normalized) {
+    return '';
+  }
+  try {
+    const parsed = new URL(normalized);
+    const name = String(parsed.pathname || '').split('/').filter(Boolean).pop() || '';
+    return decodeURIComponent(name).trim();
+  } catch {
+    return '';
+  }
+}
+
+function parseFileSize(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return Math.floor(numeric);
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) {
+    return '';
+  }
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const fixed = size >= 100 || unitIndex === 0 ? 0 : (size >= 10 ? 1 : 2);
+  return `${size.toFixed(fixed)} ${units[unitIndex]}`;
+}
+
+function toFileSegment(data = {}, fallbackType = '文件') {
+  const source = data && typeof data === 'object' ? data : {};
+  const url = normalizeMaybeHttpUrl(
+    source.url ||
+    source.download_url ||
+    source.downloadUrl ||
+    source.file_url ||
+    source.fileUrl ||
+    source.link ||
+    source.href ||
+    ''
+  );
+  const inferredName = inferFileNameFromUrl(url);
+  const name = String(
+    source.name ||
+    source.file_name ||
+    source.filename ||
+    source.fileName ||
+    source.title ||
+    inferredName ||
+    fallbackType ||
+    '文件'
+  ).trim() || (fallbackType || '文件');
+  const size = parseFileSize(
+    source.size ||
+    source.file_size ||
+    source.fileSize ||
+    source.filesize ||
+    source.bizSize ||
+    0
+  );
+  const sizeText = formatFileSize(size);
+  const text = sizeText
+    ? `[文件] ${clipText(name, 56)} (${sizeText})`
+    : `[文件] ${clipText(name, 56)}`;
+  return {
+    type: 'file',
+    name,
+    size,
+    sizeText,
+    url,
+    text,
+  };
+}
+
 function isLikelyImageUrl(url) {
   const value = String(url || '').toLowerCase();
   if (!value) {
@@ -388,7 +482,7 @@ function isRedPacketLikeSegment(seg, segType = '', elementType = NaN) {
   if (raw.includes('elementtype') && raw.includes('9')) {
     return true;
   }
-  return raw.includes('红包') || raw.includes('redbag') || raw.includes('red_packet') || raw.includes('hongbao') || raw.includes('qqwallet');
+  return raw.includes('redbag') || raw.includes('red_packet') || raw.includes('hongbao') || raw.includes('qqwallet');
 }
 
 function isRedPacketLikePayload(payload) {
@@ -400,12 +494,10 @@ function isRedPacketLikePayload(payload) {
     return true;
   }
   return (
-    raw.includes('红包') ||
     raw.includes('redbag') ||
     raw.includes('red_packet') ||
     raw.includes('hongbao') ||
-    raw.includes('qqwallet') ||
-    raw.includes('wallet')
+    raw.includes('qqwallet')
   );
 }
 
@@ -443,6 +535,8 @@ function parseRawMessage(rawMessage) {
         coverUrl: params.cover || params.thumb || params.poster || '',
         label: params.summary || params.file || 'video',
       });
+    } else if (cqType === 'file') {
+      segments.push(toFileSegment(params, '文件'));
     } else if (cqType === 'json') {
       segments.push(summarizeJsonPayload(extractCQParamValue(match[2] || '', 'data')));
     } else if (cqType === 'face') {
@@ -526,6 +620,8 @@ function normalizeSegments(payload) {
           coverUrl: String(seg?.data?.cover || seg?.data?.thumb || seg?.data?.poster || ''),
           label: String(seg?.data?.summary || seg?.data?.file || 'video'),
         });
+      } else if (segType === 'file' || segType === 'document' || segType === 'attachment') {
+        out.push(toFileSegment(seg?.data || seg, '文件'));
       } else if (segType === 'face') {
         out.push(
           toFaceSegment(
@@ -615,6 +711,8 @@ function toBrief(segments) {
       parts.push('[图片]');
     } else if (seg.type === 'video') {
       parts.push('[视频]');
+    } else if (seg.type === 'file') {
+      parts.push(seg.text || seg.name || '[文件]');
     } else if (seg.type === 'face') {
       parts.push(seg.text || `[${seg.label || '表情'}]`);
     } else if (seg.type === 'json') {

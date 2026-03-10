@@ -3,6 +3,8 @@ const WebSocket = require('ws');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { spawn } = require('node:child_process');
 const { getPrivateAvatarUrl, getGroupAvatarUrl } = require('../core/avatar-utils.cjs');
 const { clipText, normalizeSegments, toBrief, toMsTime } = require('../core/message-utils.cjs');
@@ -29,6 +31,8 @@ const BACKEND_BOOT_GRACE_MS = 45_000;
 const AUTO_RECOVERY_MIN_ATTEMPT = 3;
 const IMAGE_FETCH_TIMEOUT_MS = 12_000;
 const IMAGE_FETCH_MAX_BYTES = 15 * 1024 * 1024;
+const FILE_FETCH_TIMEOUT_MS = 120_000;
+const FILE_FETCH_MAX_BYTES = 200 * 1024 * 1024;
 const MAX_TOKEN_SCAN_DEPTH = 8;
 const MAX_TOKEN_SCAN_FILES = 240;
 const TOKEN_FILE_MAX_SIZE = 2 * 1024 * 1024;
@@ -339,6 +343,115 @@ function buildImageFileNameFromUrl(rawUrl, mime) {
   } catch {
     return fallback;
   }
+}
+
+function sanitizeDownloadFileName(value, fallback = 'file') {
+  const cleaned = String(value || '')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) {
+    return fallback;
+  }
+  return cleaned.slice(0, 128);
+}
+
+function buildDownloadFileNameFromUrl(rawUrl, fallback = 'file') {
+  try {
+    const parsed = new URL(String(rawUrl || ''));
+    const base = String(parsed.pathname || '').split('/').filter(Boolean).pop() || '';
+    const decoded = decodeURIComponent(base || '').trim();
+    return sanitizeDownloadFileName(decoded, fallback);
+  } catch {
+    return sanitizeDownloadFileName(fallback, 'file');
+  }
+}
+
+function ensureUniqueFilePath(dir, fileName) {
+  const parsed = path.parse(String(fileName || 'file'));
+  const stem = sanitizeDownloadFileName(parsed.name || 'file', 'file');
+  const ext = String(parsed.ext || '').trim();
+  let candidate = path.join(dir, `${stem}${ext}`);
+  let suffix = 1;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(dir, `${stem}-${suffix}${ext}`);
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function extractGroupIdFromRawText(raw) {
+  const text = String(raw || '');
+  const match = text.match(/(?:groupid|group_id|groupcode|group_code)=([0-9]{5,})/i);
+  return String(match?.[1] || '').trim();
+}
+
+function buildBackendGrayTipText(items) {
+  const list = Array.isArray(items) ? items : [];
+  const parts = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const type = String(item.type || '').trim().toLowerCase();
+    if (type === 'img') {
+      continue;
+    }
+    if (type === 'qq') {
+      parts.push('有人');
+      continue;
+    }
+    const text = String(item.txt || item.text || item.desc || '').trim();
+    if (text) {
+      parts.push(text);
+    }
+  }
+  return parts.join('').trim();
+}
+
+function parseBackendGrayTipLine(line) {
+  const raw = String(line || '').trim();
+  const marker = '收到未知的灰条消息';
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex < 0) {
+    return null;
+  }
+  const jsonStart = raw.indexOf('{', markerIndex);
+  if (jsonStart < 0) {
+    return null;
+  }
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw.slice(jsonStart));
+  } catch {
+    return null;
+  }
+  const items = Array.isArray(parsed?.items) ? parsed.items : [];
+  const text = buildBackendGrayTipText(items);
+  if (!text) {
+    return null;
+  }
+  let groupId = '';
+  for (const item of items) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    groupId = extractGroupIdFromRawText(item.jp || item.url || item.link || item.jumpUrl || '');
+    if (groupId) {
+      break;
+    }
+  }
+  if (!groupId) {
+    groupId = extractGroupIdFromRawText(JSON.stringify(parsed));
+  }
+  if (!groupId) {
+    return null;
+  }
+  return {
+    chatId: `group:${groupId}`,
+    groupId,
+    text,
+  };
 }
 
 function findValueByKeyRegex(obj, keyRegex, depth = 0) {
@@ -777,6 +890,13 @@ function buildReplyPreviewFromSegments(segments) {
       }
       continue;
     }
+    if (seg.type === 'file') {
+      const text = String(seg.text || seg.name || '[文件]').trim();
+      if (text) {
+        parts.push(text);
+      }
+      continue;
+    }
     if (seg.type === 'image') {
       parts.push('[图片]');
       continue;
@@ -838,6 +958,18 @@ function buildReplyRenderableSegments(segments) {
         url: String(seg.url || '').trim(),
         coverUrl: String(seg.coverUrl || '').trim(),
         label: String(seg.label || 'video').trim() || 'video',
+      });
+      continue;
+    }
+
+    if (type === 'file') {
+      out.push({
+        type: 'file',
+        name: String(seg.name || '').trim(),
+        size: Number(seg.size || 0) || 0,
+        sizeText: String(seg.sizeText || '').trim(),
+        url: String(seg.url || '').trim(),
+        text: String(seg.text || '').trim(),
       });
       continue;
     }
@@ -2941,6 +3073,7 @@ class NCatRuntime {
     const info = extractBackendWebFromLogLine(line);
     const rawLine = String(line || '');
     this.ingestBackendUnsupportedHintLine(rawLine);
+    this.ingestBackendGrayTipLine(rawLine);
     let changed = false;
     let urlUpdated = false;
     if (info.webUrl) {
@@ -3028,6 +3161,48 @@ class NCatRuntime {
       return null;
     }
     return hint;
+  }
+
+  ingestBackendGrayTipLine(line) {
+    const parsed = parseBackendGrayTipLine(line);
+    if (!parsed) {
+      return false;
+    }
+    const chatId = String(parsed.chatId || '').trim();
+    const groupId = String(parsed.groupId || '').trim();
+    const text = String(parsed.text || '').trim();
+    if (!chatId || !groupId || !text) {
+      return false;
+    }
+
+    const session = this.chatSessions.get(chatId);
+    const ts = Date.now();
+    const title = String(session?.title || `群 ${groupId}`);
+    const messageId = `gray-tip:${groupId}:${ts}:${text.slice(0, 24)}`;
+    const appended = this.appendMessageToSession({
+      chatId,
+      type: 'group',
+      targetId: groupId,
+      title,
+      avatarUrl: String(session?.avatarUrl || getGroupAvatarUrl(groupId)),
+      direction: 'in',
+      senderId: '',
+      senderName: '',
+      senderAvatarUrl: '',
+      segments: [{
+        type: 'text',
+        text,
+      }],
+      timestamp: ts,
+      messageId,
+      rawMessageId: '',
+      displayStyle: 'system',
+      countUnread: true,
+    });
+    if (appended) {
+      this.log(`backend gray tip ingested: chat=${chatId}, text=${text}`);
+    }
+    return appended;
   }
 
   handleBackendWsReadySignal(rawLine) {
@@ -3648,6 +3823,119 @@ class NCatRuntime {
       envVarName,
       filePath: '',
     };
+  }
+
+  resolveDownloadDir() {
+    const config = vscode.workspace.getConfiguration();
+    const ncatRoot = String(this.resolveNCatRootDir(config) || '').trim();
+    if (ncatRoot) {
+      return path.join(ncatRoot, 'vscode-downloads');
+    }
+    const globalStorage = String(this.context?.globalStorageUri?.fsPath || '').trim();
+    if (globalStorage) {
+      return path.join(globalStorage, 'downloads');
+    }
+    const workspaceRoot = String(this.getWorkspaceRoot() || '').trim();
+    if (workspaceRoot) {
+      return path.join(workspaceRoot, '.ncat-downloads');
+    }
+    return path.join(os.homedir(), 'NCatVSC', 'downloads');
+  }
+
+  async downloadFileFromUrl(rawUrl, preferredName = '') {
+    const normalized = normalizeHttpUrl(rawUrl);
+    if (!normalized) {
+      throw new Error('invalid file url');
+    }
+
+    const fetchImpl = globalThis.fetch;
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('global fetch is unavailable');
+    }
+
+    const targetDir = this.resolveDownloadDir();
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        // Ignore.
+      }
+    }, FILE_FETCH_TIMEOUT_MS);
+
+    let filePath = '';
+    try {
+      this.log(`downloadFile start: url=${normalized}, name=${preferredName || '(auto)'}`);
+      const response = await fetchImpl(normalized, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'NCatVSC/1.0',
+          Accept: '*/*',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`http status ${response.status}`);
+      }
+      const contentLength = Number(response.headers.get('content-length') || 0);
+      if (Number.isFinite(contentLength) && contentLength > FILE_FETCH_MAX_BYTES) {
+        throw new Error(`file too large (${contentLength} bytes)`);
+      }
+      if (!response.body) {
+        throw new Error('empty response body');
+      }
+
+      const suggestedName = sanitizeDownloadFileName(preferredName || '', '');
+      const fallbackName = buildDownloadFileNameFromUrl(normalized, 'file');
+      const finalName = suggestedName || fallbackName;
+      filePath = ensureUniqueFilePath(targetDir, finalName);
+
+      let writtenBytes = 0;
+      const stream = Readable.fromWeb(response.body);
+      stream.on('data', (chunk) => {
+        if (typeof chunk === 'string') {
+          writtenBytes += Buffer.byteLength(chunk);
+        } else if (chunk && typeof chunk.length === 'number') {
+          writtenBytes += chunk.length;
+        } else {
+          writtenBytes += Buffer.byteLength(Buffer.from(chunk || []));
+        }
+        if (writtenBytes > FILE_FETCH_MAX_BYTES) {
+          stream.destroy(new Error(`file too large (${writtenBytes} bytes)`));
+        }
+      });
+      await pipeline(stream, fs.createWriteStream(filePath));
+      if (!fs.existsSync(filePath)) {
+        throw new Error('download file missing after save');
+      }
+      if (writtenBytes <= 0) {
+        writtenBytes = Number(fs.statSync(filePath).size || 0);
+      }
+      this.log(`downloadFile success: path=${filePath}, bytes=${writtenBytes}, url=${normalized}`);
+      return {
+        path: filePath,
+        dir: targetDir,
+        fileName: path.basename(filePath),
+        bytes: writtenBytes,
+        url: normalized,
+      };
+    } catch (error) {
+      if (filePath && fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          // Ignore cleanup failure.
+        }
+      }
+      const reason = error?.message || String(error);
+      this.log(`downloadFile failed: url=${normalized}, reason=${reason}`);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async resolveImageUrlToDataUrl(rawUrl) {

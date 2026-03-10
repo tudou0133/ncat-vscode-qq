@@ -461,6 +461,52 @@ function renderMessageScript() {
       mediaViewerOverlay.setAttribute('aria-hidden', 'false');
     }
 
+    function truncateFileNameKeepExt(name, maxBytes = 64) {
+      const raw = String(name || '').trim();
+      if (!raw) {
+        return '文件';
+      }
+      const encoder = new TextEncoder();
+      if (encoder.encode(raw).length <= maxBytes) {
+        return raw;
+      }
+
+      const dot = raw.lastIndexOf('.');
+      const hasExt = dot > 0 && dot < raw.length - 1;
+      const ext = hasExt ? raw.slice(dot) : '';
+      const base = hasExt ? raw.slice(0, dot) : raw;
+      const ellipsis = '...';
+      const extBytes = encoder.encode(ext).length;
+      const ellipsisBytes = encoder.encode(ellipsis).length;
+      let budget = maxBytes - ellipsisBytes - extBytes;
+
+      if (budget <= 0) {
+        let compact = '';
+        let used = 0;
+        for (const ch of raw) {
+          const bytes = encoder.encode(ch).length;
+          if (used + bytes + ellipsisBytes > maxBytes) {
+            break;
+          }
+          compact += ch;
+          used += bytes;
+        }
+        return compact ? (compact + ellipsis) : raw;
+      }
+
+      let clipped = '';
+      let used = 0;
+      for (const ch of base) {
+        const bytes = encoder.encode(ch).length;
+        if (used + bytes > budget) {
+          break;
+        }
+        clipped += ch;
+        used += bytes;
+      }
+      return (clipped || base.slice(0, 1)) + ellipsis + ext;
+    }
+
     function buildSegment(seg, imageMeta, messageMeta) {
       if (seg.type === 'image') {
         const chip = document.createElement('span');
@@ -655,6 +701,38 @@ function renderMessageScript() {
         }
 
         return chip;
+      }
+
+      if (seg.type === 'file') {
+        const file = document.createElement('span');
+        file.className = 'seg-file';
+        file.title = String(seg.text || seg.name || '[文件]');
+
+        const icon = document.createElement('span');
+        icon.className = 'seg-file-icon';
+        const folder = document.createElement('span');
+        folder.className = 'seg-file-folder';
+        folder.setAttribute('aria-hidden', 'true');
+        icon.appendChild(folder);
+        file.appendChild(icon);
+
+        const meta = document.createElement('span');
+        meta.className = 'seg-file-meta';
+
+        const name = document.createElement('span');
+        name.className = 'seg-file-name';
+        name.textContent = truncateFileNameKeepExt(seg.name || '文件', 64);
+        meta.appendChild(name);
+
+        if (seg.sizeText) {
+          const size = document.createElement('span');
+          size.className = 'seg-file-size';
+          size.textContent = String(seg.sizeText);
+          meta.appendChild(size);
+        }
+
+        file.appendChild(meta);
+        return file;
       }
 
       if (seg.type === 'poke_notice') {
@@ -912,6 +990,16 @@ function renderMessageScript() {
         row.className = 'msg-row ' + (isOut ? 'out' : 'in');
         row.dataset.messageId = String(msg.id || '');
         row.dataset.rawMessageId = String(msg.rawMessageId || '');
+        if (jumpHighlightState && Number(jumpHighlightState.until || 0) > Date.now()) {
+          const activeMessageId = String(jumpHighlightState.messageId || '').trim();
+          const activeRawMessageId = String(jumpHighlightState.rawMessageId || '').trim();
+          if (
+            (activeMessageId && activeMessageId === String(msg.id || '')) ||
+            (activeRawMessageId && activeRawMessageId === String(msg.rawMessageId || ''))
+          ) {
+            row.classList.add('jump-target');
+          }
+        }
 
         const sender = msg.senderName || msg.senderId || 'unknown';
         const avatar = document.createElement('span');

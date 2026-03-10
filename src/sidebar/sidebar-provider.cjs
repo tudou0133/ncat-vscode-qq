@@ -240,6 +240,23 @@ class NCatSidebarProvider {
           this.runtime.showLogs();
           return;
         }
+        if (action === 'openDownloadFolder') {
+          const dir = String(this.runtime.resolveDownloadDir?.() || '').trim();
+          if (!dir) {
+            vscode.window.showWarningMessage('下载目录未就绪。');
+            return;
+          }
+          try {
+            fs.mkdirSync(dir, { recursive: true });
+            const opened = await vscode.env.openExternal(vscode.Uri.file(dir));
+            if (!opened) {
+              vscode.window.showWarningMessage('下载文件夹打开失败，请稍后重试。');
+            }
+          } catch (error) {
+            vscode.window.showWarningMessage(`下载文件夹打开失败: ${error?.message || String(error)}`);
+          }
+          return;
+        }
         if (action === 'connect') {
           await this.runtime.startPluginRuntime({
             silent: false,
@@ -566,6 +583,70 @@ class NCatSidebarProvider {
           );
         } else {
           vscode.window.showWarningMessage(`添加到表情包失败: ${result.error || '未知错误'}`);
+        }
+        return;
+      }
+
+      if (msg.type === 'downloadChatFiles') {
+        const entries = Array.isArray(msg.files) ? msg.files : [];
+        const normalizedFiles = [];
+        const seen = new Set();
+        for (const item of entries) {
+          const url = toSafeExternalUrl(item?.url || '');
+          if (!isHttpUrl(url)) {
+            continue;
+          }
+          if (seen.has(url)) {
+            continue;
+          }
+          seen.add(url);
+          normalizedFiles.push({
+            url,
+            name: String(item?.name || '').trim(),
+          });
+        }
+        if (normalizedFiles.length === 0) {
+          this.view?.webview.postMessage({
+            type: 'downloadChatFilesResult',
+            ok: false,
+            savedCount: 0,
+            failedCount: 0,
+            error: '没有可下载的文件链接',
+            dir: String(this.runtime.resolveDownloadDir?.() || ''),
+          });
+          vscode.window.showWarningMessage('这条文件消息没有可下载的链接。');
+          return;
+        }
+
+        const results = [];
+        let savedCount = 0;
+        let failedCount = 0;
+        let dir = '';
+        for (const item of normalizedFiles) {
+          try {
+            const saved = await this.runtime.downloadFileFromUrl(item.url, item.name);
+            dir = String(saved?.dir || dir || '');
+            results.push(saved);
+            savedCount += 1;
+          } catch (error) {
+            failedCount += 1;
+            this.runtime.log(`downloadChatFiles failed: url=${item.url}, reason=${error?.message || String(error)}`);
+          }
+        }
+
+        const ok = savedCount > 0;
+        this.view?.webview.postMessage({
+          type: 'downloadChatFilesResult',
+          ok,
+          savedCount,
+          failedCount,
+          dir: dir || String(this.runtime.resolveDownloadDir?.() || ''),
+          error: ok ? '' : '文件下载失败',
+        });
+        if (ok) {
+          vscode.window.showInformationMessage(`文件已下载到: ${dir || this.runtime.resolveDownloadDir?.() || ''}`);
+        } else {
+          vscode.window.showWarningMessage('文件下载失败。');
         }
         return;
       }

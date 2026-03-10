@@ -181,6 +181,13 @@ function renderSettingsScript() {
         });
       });
 
+      document.getElementById('settingOpenDownloads').addEventListener('click', () => {
+        vscode.postMessage({
+          type: 'settingsAction',
+          action: 'openDownloadFolder',
+        });
+      });
+
       document.getElementById('settingOpenExt').addEventListener('click', () => {
         vscode.postMessage({
           type: 'settingsAction',

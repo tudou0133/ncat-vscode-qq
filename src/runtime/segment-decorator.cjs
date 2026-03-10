@@ -35,6 +35,13 @@ function buildReplyPreviewFromSegments(segments) {
       }
       continue;
     }
+    if (seg.type === 'file') {
+      const text = String(seg.text || seg.name || '[文件]').trim();
+      if (text) {
+        parts.push(text);
+      }
+      continue;
+    }
     if (seg.type === 'image') {
       parts.push('[图片]');
       continue;
@@ -115,6 +122,18 @@ function buildReplyRenderableSegments(segments) {
         url: String(seg.url || '').trim(),
         coverUrl: String(seg.coverUrl || '').trim(),
         label: String(seg.label || 'video').trim() || 'video',
+      });
+      continue;
+    }
+
+    if (type === 'file') {
+      out.push({
+        type: 'file',
+        name: String(seg.name || '').trim(),
+        size: Number(seg.size || 0) || 0,
+        sizeText: String(seg.sizeText || '').trim(),
+        url: String(seg.url || '').trim(),
+        text: String(seg.text || '').trim(),
       });
       continue;
     }

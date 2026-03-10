@@ -928,7 +928,7 @@ function renderHtml(webview) {
     .msg-row.jump-target .msg-bubble {
       border-color: #ff9f43;
       box-shadow: 0 0 0 1px rgba(255, 159, 67, 0.55), 0 0 26px rgba(255, 136, 0, 0.32);
-      animation: jumpTargetPulse 3s ease;
+      animation: jumpTargetPulse 0.68s ease 0s 4 both;
     }
 
     @keyframes jumpTargetPulse {
@@ -936,33 +936,13 @@ function renderHtml(webview) {
         transform: scale(0.985);
         box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.62);
       }
-      12.5% {
+      35% {
         transform: scale(1.01);
         box-shadow: 0 0 0 7px rgba(255, 159, 67, 0.24);
       }
-      25% {
+      70% {
         transform: scale(0.992);
         box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.06);
-      }
-      37.5% {
-        transform: scale(1.01);
-        box-shadow: 0 0 0 7px rgba(255, 159, 67, 0.24);
-      }
-      50% {
-        transform: scale(0.992);
-        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.06);
-      }
-      62.5% {
-        transform: scale(1.01);
-        box-shadow: 0 0 0 7px rgba(255, 159, 67, 0.24);
-      }
-      75% {
-        transform: scale(0.992);
-        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.06);
-      }
-      87.5% {
-        transform: scale(1.008);
-        box-shadow: 0 0 0 6px rgba(255, 159, 67, 0.2);
       }
       100% {
         transform: scale(1);
@@ -1459,11 +1439,39 @@ function renderHtml(webview) {
     }
 
     .seg-reply .seg-image,
-    .seg-reply .seg-video {
+    .seg-reply .seg-video,
+    .seg-reply .seg-file {
       width: 30px;
       height: 30px;
       border-radius: 8px;
       margin: 1px 3px 1px 0;
+    }
+
+    .seg-reply .seg-file {
+      width: auto;
+      max-width: 120px;
+      min-height: 30px;
+      padding: 2px 0;
+      gap: 5px;
+    }
+
+    .seg-reply .seg-file-icon {
+      width: 18px;
+      height: 18px;
+    }
+
+    .seg-reply .seg-file-folder {
+      width: 16px;
+      height: 12px;
+    }
+
+    .seg-reply .seg-file-name {
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    .seg-reply .seg-file-size {
+      font-size: 9px;
     }
 
     .seg-reply .seg-image-thumb,
@@ -1525,6 +1533,81 @@ function renderHtml(webview) {
     .seg-json-action:hover {
       border-color: rgba(149, 184, 225, 0.82);
       background: rgba(28, 49, 78, 0.96);
+    }
+
+    .seg-file {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: min(320px, 72vw);
+      padding: 2px 0;
+      margin: 1px 0;
+      border-radius: 0;
+      background: transparent;
+      border: none;
+      color: #eef5ff;
+      vertical-align: top;
+    }
+
+    .seg-file-icon {
+      flex: 0 0 auto;
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .seg-file-folder {
+      position: relative;
+      width: 20px;
+      height: 15px;
+      display: inline-block;
+    }
+
+    .seg-file-folder::before {
+      content: '';
+      position: absolute;
+      left: 1px;
+      top: 1px;
+      width: 8px;
+      height: 4px;
+      border-radius: 4px 4px 0 0;
+      background: rgba(255, 194, 93, 0.92);
+      box-shadow: 0 0 0 1px rgba(120, 78, 18, 0.08) inset;
+    }
+
+    .seg-file-folder::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 11px;
+      border-radius: 4px;
+      background: linear-gradient(180deg, rgba(255, 205, 116, 0.98) 0%, rgba(243, 169, 58, 0.98) 100%);
+      box-shadow:
+        0 1px 0 rgba(255, 235, 183, 0.22) inset,
+        0 0 0 1px rgba(129, 83, 14, 0.14) inset;
+    }
+
+    .seg-file-meta {
+      min-width: 0;
+      display: inline-flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .seg-file-name {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.25;
+      word-break: break-all;
+    }
+
+    .seg-file-size {
+      font-size: 10px;
+      opacity: 0.75;
     }
 
     .seg-forward.clickable {
@@ -1862,6 +1945,17 @@ function renderHtml(webview) {
       flex-wrap: wrap;
     }
 
+    .settings-action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .settings-action-grid .settings-action {
+      width: 100%;
+      min-width: 0;
+    }
+
     .settings-action {
       width: fit-content;
       min-width: 92px;
@@ -2009,14 +2103,15 @@ function renderHtml(webview) {
     <button id="chatTitleMenuHide" class="avatar-menu-item" type="button">在界面中隐藏</button>
   </div>
   <div id="bubbleMenu" class="bubble-menu" hidden>
-    <button id="bubbleMenuReply" class="bubble-menu-item" type="button">回复这条消息</button>
-    <button id="bubbleMenuJump" class="bubble-menu-item" type="button" hidden>跳转到原消息</button>
-    <button id="bubbleMenuForward" class="bubble-menu-item" type="button">转发这条消息</button>
-    <button id="bubbleMenuCopy" class="bubble-menu-item" type="button">复制这条消息</button>
-    <button id="bubbleMenuCopyRaw" class="bubble-menu-item" type="button">复制原始消息(JSON)</button>
-    <button id="bubbleMenuRecall" class="bubble-menu-item" type="button" hidden>撤回这条消息</button>
+    <button id="bubbleMenuReply" class="bubble-menu-item" type="button">回复</button>
+    <button id="bubbleMenuJump" class="bubble-menu-item" type="button" hidden>跳转到</button>
+    <button id="bubbleMenuForward" class="bubble-menu-item" type="button">转发</button>
+    <button id="bubbleMenuDownload" class="bubble-menu-item" type="button" hidden>下载</button>
+    <button id="bubbleMenuCopy" class="bubble-menu-item" type="button">复制</button>
+    <button id="bubbleMenuCopyRaw" class="bubble-menu-item" type="button">复制JSON</button>
+    <button id="bubbleMenuRecall" class="bubble-menu-item" type="button" hidden>撤回</button>
     <button id="bubbleMenuSaveSticker" class="bubble-menu-item" type="button">添加到表情包</button>
-    <button id="bubbleMenuPlusOne" class="bubble-menu-item" type="button">直接 +1 发送</button>
+    <button id="bubbleMenuPlusOne" class="bubble-menu-item" type="button">+1</button>
   </div>
   <div id="stickerItemMenu" class="sticker-item-menu" hidden>
     <button id="stickerItemMenuAdd" class="sticker-item-menu-item" type="button">添加本地图片到表情包</button>
@@ -2031,9 +2126,12 @@ function renderHtml(webview) {
       <div class="settings-body">
         <div class="settings-group">
           <div class="settings-group-title">常用</div>
-          <button id="settingOpenLogs" class="settings-action" type="button">打开日志</button>
-          <button id="settingOpenExt" class="settings-action" type="button">打开扩展设置</button>
-          <button id="settingOpenNapcatReleases" class="settings-action" type="button">打开NCat发布页面</button>
+          <div class="settings-action-grid">
+            <button id="settingOpenLogs" class="settings-action" type="button">打开日志</button>
+            <button id="settingOpenDownloads" class="settings-action" type="button">打开下载文件夹</button>
+            <button id="settingOpenExt" class="settings-action" type="button">打开扩展设置</button>
+            <button id="settingOpenNapcatReleases" class="settings-action" type="button">打开NCat发布页面</button>
+          </div>
         </div>
         <div class="settings-group">
           <div class="settings-group-title">NCat 后端</div>
@@ -2208,6 +2306,12 @@ function renderHtml(webview) {
     const avatarLogKeys = new Set();
     const mediaNoRetryRawMessageIds = new Set();
     const SHOW_INVITE_OPEN_ACTION = false;
+    let jumpHighlightState = {
+      messageId: '',
+      rawMessageId: '',
+      until: 0,
+      clearTimer: null,
+    };
 
     function fmtTime(ms) {
       if (!ms) return '';
@@ -2791,12 +2895,28 @@ ${renderMessageScript()}
 
     function jumpToMessage(targetMessageId, targetRawMessageId) {
       const row = findRenderedMessageRow(targetMessageId, targetRawMessageId);
+      const localId = String(targetMessageId || '').trim();
+      const rawId = String(targetRawMessageId || '').trim();
+      jumpHighlightState.messageId = localId;
+      jumpHighlightState.rawMessageId = rawId;
+      jumpHighlightState.until = Date.now() + 3200;
+      if (jumpHighlightState.clearTimer) {
+        clearTimeout(jumpHighlightState.clearTimer);
+      }
+      jumpHighlightState.clearTimer = setTimeout(() => {
+        jumpHighlightState.messageId = '';
+        jumpHighlightState.rawMessageId = '';
+        jumpHighlightState.until = 0;
+        jumpHighlightState.clearTimer = null;
+        renderAll();
+      }, 3250);
       if (!row) {
         logWeb(
           'warn',
-          'jump target not found: messageId=' + String(targetMessageId || '(none)') +
-            ', rawMessageId=' + String(targetRawMessageId || '(none)')
+          'jump target not found: messageId=' + String(localId || '(none)') +
+            ', rawMessageId=' + String(rawId || '(none)')
         );
+        renderAll();
         return false;
       }
       row.scrollIntoView({
@@ -2806,9 +2926,6 @@ ${renderMessageScript()}
       row.classList.remove('jump-target');
       void row.offsetWidth;
       row.classList.add('jump-target');
-      setTimeout(() => {
-        row.classList.remove('jump-target');
-      }, 2400);
       return true;
     }
 
@@ -3009,6 +3126,25 @@ ${renderMessageScript()}
               ', rawMessageId=' + (rawMessageId || '(none)') +
               ', reason=' + String(msg.error || 'unknown') +
               (noRetry ? ' (no-retry)' : '')
+          );
+        }
+        return;
+      }
+
+      if (msg.type === 'downloadChatFilesResult') {
+        if (msg.ok) {
+          logWeb(
+            'info',
+            'download files success: saved=' + String(msg.savedCount || 0) +
+              ', failed=' + String(msg.failedCount || 0) +
+              ', dir=' + String(msg.dir || '')
+          );
+        } else {
+          logWeb(
+            'warn',
+            'download files failed: saved=' + String(msg.savedCount || 0) +
+              ', failed=' + String(msg.failedCount || 0) +
+              ', reason=' + String(msg.error || 'unknown')
           );
         }
         return;

@@ -444,6 +444,44 @@ function renderMentionMenuScript() {
       return '';
     }
 
+    function extractCopyableRawJson(msg) {
+      const segments = Array.isArray(msg?.segments) ? msg.segments : [];
+      for (const seg of segments) {
+        if (!seg || seg.type !== 'json') {
+          continue;
+        }
+        const raw = String(seg.raw || '').trim();
+        if (raw) {
+          return raw;
+        }
+      }
+      return '';
+    }
+
+    function extractDownloadableFiles(msg) {
+      const segments = Array.isArray(msg?.segments) ? msg.segments : [];
+      const out = [];
+      const seen = new Set();
+      for (const seg of segments) {
+        if (!seg || seg.type !== 'file') {
+          continue;
+        }
+        const url = String(seg.url || '').trim();
+        if (!/^https?:\/\//i.test(url)) {
+          continue;
+        }
+        if (seen.has(url)) {
+          continue;
+        }
+        seen.add(url);
+        out.push({
+          url,
+          name: String(seg.name || '').trim(),
+        });
+      }
+      return out;
+    }
+
     function buildForwardDraftFromMessage(msg) {
       if (!msg) {
         return null;
@@ -484,12 +522,14 @@ function renderMentionMenuScript() {
       const recallBtn = document.getElementById('bubbleMenuRecall');
       const jumpBtn = document.getElementById('bubbleMenuJump');
       const forwardBtn = document.getElementById('bubbleMenuForward');
+      const downloadBtn = document.getElementById('bubbleMenuDownload');
       if (!menu) {
         return;
       }
 
       const currentMsg = findMessageById(messageId);
       const jumpTarget = currentMsg ? extractBubbleJumpTarget(currentMsg) : null;
+      const downloadableFiles = currentMsg ? extractDownloadableFiles(currentMsg) : [];
 
       bubbleMenuState.open = true;
       bubbleMenuState.messageId = messageId;
@@ -509,11 +549,14 @@ function renderMentionMenuScript() {
       if (jumpBtn) {
         jumpBtn.hidden = !bubbleMenuState.jumpTargetMessageId;
         if (bubbleMenuState.jumpTargetLabel) {
-          jumpBtn.textContent = '跳转到原消息';
+          jumpBtn.textContent = '跳转到';
         }
       }
       if (forwardBtn) {
         forwardBtn.hidden = false;
+      }
+      if (downloadBtn) {
+        downloadBtn.hidden = downloadableFiles.length === 0;
       }
 
       menu.hidden = false;
@@ -558,6 +601,13 @@ function renderMentionMenuScript() {
         }
         if (seg.type === 'json') {
           const text = String(seg.summary || seg.title || seg.raw || '').trim();
+          if (text) {
+            parts.push(text);
+          }
+          continue;
+        }
+        if (seg.type === 'file') {
+          const text = String(seg.text || seg.name || '[文件]').trim();
           if (text) {
             parts.push(text);
           }
@@ -695,6 +745,28 @@ function renderMentionMenuScript() {
         openMessageForwardPicker(draft);
       });
 
+      document.getElementById('bubbleMenuDownload').addEventListener('click', () => {
+        const msg = findMessageById(bubbleMenuState.messageId);
+        if (!msg) {
+          logWeb('warn', 'download file ignored: message not found');
+          closeBubbleMenu();
+          return;
+        }
+        const files = extractDownloadableFiles(msg);
+        if (files.length === 0) {
+          logWeb('warn', 'download file ignored: no downloadable file url');
+          closeBubbleMenu();
+          return;
+        }
+        vscode.postMessage({
+          type: 'downloadChatFiles',
+          chatId: String(state.selectedChatId || ''),
+          messageId: String(msg.id || ''),
+          files,
+        });
+        closeBubbleMenu();
+      });
+
       document.getElementById('bubbleMenuCopy').addEventListener('click', async () => {
         const msg = findMessageById(bubbleMenuState.messageId);
         if (!msg) {
@@ -750,6 +822,17 @@ function renderMentionMenuScript() {
         const msg = findMessageById(bubbleMenuState.messageId);
         if (!msg) {
           logWeb('warn', 'copy raw message ignored: message not found');
+          closeBubbleMenu();
+          return;
+        }
+        const rawJson = extractCopyableRawJson(msg);
+        if (rawJson) {
+          const copiedRawJson = await copyToClipboard(rawJson);
+          if (copiedRawJson) {
+            logWeb('info', 'raw card json copied');
+          } else {
+            logWeb('warn', 'raw card json copy failed');
+          }
           closeBubbleMenu();
           return;
         }
