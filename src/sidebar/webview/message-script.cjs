@@ -910,6 +910,8 @@ function renderMessageScript() {
         const isOut = msg.direction === 'out';
         const row = document.createElement('div');
         row.className = 'msg-row ' + (isOut ? 'out' : 'in');
+        row.dataset.messageId = String(msg.id || '');
+        row.dataset.rawMessageId = String(msg.rawMessageId || '');
 
         const sender = msg.senderName || msg.senderId || 'unknown';
         const avatar = document.createElement('span');

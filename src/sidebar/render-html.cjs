@@ -925,6 +925,51 @@ function renderHtml(webview) {
       z-index: 70;
     }
 
+    .msg-row.jump-target .msg-bubble {
+      border-color: #ff9f43;
+      box-shadow: 0 0 0 1px rgba(255, 159, 67, 0.55), 0 0 26px rgba(255, 136, 0, 0.32);
+      animation: jumpTargetPulse 3s ease;
+    }
+
+    @keyframes jumpTargetPulse {
+      0% {
+        transform: scale(0.985);
+        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.62);
+      }
+      12.5% {
+        transform: scale(1.01);
+        box-shadow: 0 0 0 7px rgba(255, 159, 67, 0.24);
+      }
+      25% {
+        transform: scale(0.992);
+        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.06);
+      }
+      37.5% {
+        transform: scale(1.01);
+        box-shadow: 0 0 0 7px rgba(255, 159, 67, 0.24);
+      }
+      50% {
+        transform: scale(0.992);
+        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.06);
+      }
+      62.5% {
+        transform: scale(1.01);
+        box-shadow: 0 0 0 7px rgba(255, 159, 67, 0.24);
+      }
+      75% {
+        transform: scale(0.992);
+        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0.06);
+      }
+      87.5% {
+        transform: scale(1.008);
+        box-shadow: 0 0 0 6px rgba(255, 159, 67, 0.2);
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(255, 159, 67, 0);
+      }
+    }
+
     .msg-main {
       min-width: 0;
       max-width: calc(100% - 42px);
@@ -1617,6 +1662,132 @@ function renderHtml(webview) {
       word-break: break-word;
     }
 
+    .forward-picker-head {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .forward-picker-summary {
+      font-size: 11px;
+      color: #dce8fb;
+      line-height: 1.35;
+      word-break: break-word;
+      opacity: 0.92;
+    }
+
+    .forward-picker-search {
+      width: 100%;
+      height: 32px;
+      border-radius: 10px;
+      border: 1px solid rgba(73, 101, 138, 0.9);
+      background: rgba(9, 17, 31, 0.98);
+      color: #eaf2ff;
+      font-size: 11px;
+      padding: 0 10px;
+      outline: none;
+      box-sizing: border-box;
+    }
+
+    .forward-picker-search:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(111, 151, 198, 0.35);
+    }
+
+    .forward-target-list {
+      padding: 10px;
+      overflow-y: scroll;
+      scrollbar-gutter: stable;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 120px;
+    }
+
+    .forward-target-list::-webkit-scrollbar {
+      width: 11px;
+      height: 11px;
+    }
+
+    .forward-target-list::-webkit-scrollbar-track {
+      background: #142036;
+      border-radius: 10px;
+    }
+
+    .forward-target-list::-webkit-scrollbar-thumb {
+      background: #4b5f82;
+      border-radius: 10px;
+      border: 2px solid #142036;
+    }
+
+    .forward-target-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 11px;
+      border-radius: 12px;
+      border: 1px solid rgba(62, 88, 121, 0.88);
+      background: rgba(15, 27, 45, 0.94);
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+    }
+
+    .forward-target-card:hover {
+      transform: translateY(-1px);
+      border-color: rgba(120, 160, 214, 0.92);
+      background: rgba(21, 37, 60, 0.98);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+    }
+
+    .forward-target-card.sending {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .forward-target-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: linear-gradient(145deg, #5d84b3, #3f638e);
+      color: #e5eefb;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+    }
+
+    .forward-target-meta {
+      min-width: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .forward-target-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #eef4ff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .forward-target-sub {
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .settings-overlay {
       position: absolute;
       inset: 0;
@@ -1815,6 +1986,19 @@ function renderHtml(webview) {
       <div id="forwardBody" class="forward-body"></div>
     </div>
   </div>
+  <div id="forwardPickerOverlay" class="forward-overlay" aria-hidden="true">
+    <div class="forward-panel">
+      <div class="forward-topbar">
+        <div id="forwardPickerTitle" class="forward-title">转发到</div>
+        <button id="btnCloseForwardPicker" type="button">关闭</button>
+      </div>
+      <div class="forward-picker-head">
+        <div id="forwardPickerSummary" class="forward-picker-summary"></div>
+        <input id="forwardPickerSearch" class="forward-picker-search" type="text" placeholder="搜索会话名 / 群号 / QQ号" />
+      </div>
+      <div id="forwardPickerList" class="forward-target-list"></div>
+    </div>
+  </div>
   <div id="avatarMenu" class="avatar-menu" hidden>
     <button id="avatarMenuAt" class="avatar-menu-item" type="button">AT 他</button>
     <button id="avatarMenuPoke" class="avatar-menu-item" type="button">戳一戳</button>
@@ -1826,6 +2010,8 @@ function renderHtml(webview) {
   </div>
   <div id="bubbleMenu" class="bubble-menu" hidden>
     <button id="bubbleMenuReply" class="bubble-menu-item" type="button">回复这条消息</button>
+    <button id="bubbleMenuJump" class="bubble-menu-item" type="button" hidden>跳转到原消息</button>
+    <button id="bubbleMenuForward" class="bubble-menu-item" type="button">转发这条消息</button>
     <button id="bubbleMenuCopy" class="bubble-menu-item" type="button">复制这条消息</button>
     <button id="bubbleMenuCopyRaw" class="bubble-menu-item" type="button">复制原始消息(JSON)</button>
     <button id="bubbleMenuRecall" class="bubble-menu-item" type="button" hidden>撤回这条消息</button>
@@ -1992,6 +2178,8 @@ function renderHtml(webview) {
       text: '',
       hasImage: false,
       canRecall: false,
+      jumpTargetMessageId: '',
+      jumpTargetLabel: '',
     };
     let forwardPreview = {
       open: false,
@@ -2000,6 +2188,13 @@ function renderHtml(webview) {
       title: '合并转发',
       nodes: [],
       error: '',
+    };
+    let messageForwardPicker = {
+      open: false,
+      query: '',
+      summary: '',
+      draft: null,
+      sendingChatId: '',
     };
     let stickerPanelState = {
       open: false,
@@ -2564,6 +2759,59 @@ ${renderMessageScript()}
       return (Array.isArray(state.selectedMessages) ? state.selectedMessages : []).find((item) => String(item?.id || '') === id) || null;
     }
 
+    function findMessageByRawMessageId(rawMessageId) {
+      const rawId = String(rawMessageId || '').trim();
+      if (!rawId) {
+        return null;
+      }
+      return (Array.isArray(state.selectedMessages) ? state.selectedMessages : []).find((item) => String(item?.rawMessageId || '') === rawId) || null;
+    }
+
+    function findRenderedMessageRow(messageId, rawMessageId) {
+      const root = document.getElementById('messages');
+      if (!root) {
+        return null;
+      }
+      const localId = String(messageId || '').trim();
+      const rawId = String(rawMessageId || '').trim();
+      const rows = Array.from(root.querySelectorAll('.msg-row'));
+      return rows.find((row) => {
+        if (!(row instanceof HTMLElement)) {
+          return false;
+        }
+        if (localId && String(row.dataset.messageId || '') === localId) {
+          return true;
+        }
+        if (rawId && String(row.dataset.rawMessageId || '') === rawId) {
+          return true;
+        }
+        return false;
+      }) || null;
+    }
+
+    function jumpToMessage(targetMessageId, targetRawMessageId) {
+      const row = findRenderedMessageRow(targetMessageId, targetRawMessageId);
+      if (!row) {
+        logWeb(
+          'warn',
+          'jump target not found: messageId=' + String(targetMessageId || '(none)') +
+            ', rawMessageId=' + String(targetRawMessageId || '(none)')
+        );
+        return false;
+      }
+      row.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      row.classList.remove('jump-target');
+      void row.offsetWidth;
+      row.classList.add('jump-target');
+      setTimeout(() => {
+        row.classList.remove('jump-target');
+      }, 2400);
+      return true;
+    }
+
     function sendQuickText(text) {
       const selected = getSelectedChat();
       const value = String(text || '').trim();
@@ -2629,6 +2877,7 @@ ${renderMessageScript()}
         renderCards();
         renderMessages();
         renderForwardPreview();
+        renderMessageForwardPicker();
         renderComposerAttachments();
         renderComposerReply();
         renderComposerState();

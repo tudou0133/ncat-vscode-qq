@@ -3,6 +3,7 @@
 .gitignore
 .vscode/**
 local/**
+HANDOFF.md
 
 # Development-only docs and scripts
 docs/**

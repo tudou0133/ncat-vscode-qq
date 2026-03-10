@@ -57,6 +57,174 @@ function renderListForwardScript() {
       });
     }
 
+    function closeMessageForwardPicker() {
+      messageForwardPicker = {
+        open: false,
+        query: '',
+        summary: '',
+        draft: null,
+        sendingChatId: '',
+      };
+      renderMessageForwardPicker();
+    }
+
+    function openMessageForwardPicker(draft) {
+      const payload = draft && typeof draft === 'object' ? draft : null;
+      if (!payload) {
+        return;
+      }
+      messageForwardPicker = {
+        open: true,
+        query: '',
+        summary: String(payload.summary || '转发消息').trim(),
+        draft: payload,
+        sendingChatId: '',
+      };
+      renderMessageForwardPicker();
+      const search = document.getElementById('forwardPickerSearch');
+      if (search) {
+        search.value = '';
+        search.focus();
+      }
+    }
+
+    function renderMessageForwardPicker() {
+      const overlay = document.getElementById('forwardPickerOverlay');
+      const summaryNode = document.getElementById('forwardPickerSummary');
+      const list = document.getElementById('forwardPickerList');
+      const search = document.getElementById('forwardPickerSearch');
+      if (!overlay || !summaryNode || !list || !search) {
+        return;
+      }
+
+      overlay.classList.toggle('open', !!messageForwardPicker.open);
+      overlay.setAttribute('aria-hidden', messageForwardPicker.open ? 'false' : 'true');
+      summaryNode.textContent = String(messageForwardPicker.summary || '转发消息');
+
+      if (!messageForwardPicker.open) {
+        return;
+      }
+
+      if (search.value !== String(messageForwardPicker.query || '')) {
+        search.value = String(messageForwardPicker.query || '');
+      }
+
+      list.innerHTML = '';
+      const query = String(messageForwardPicker.query || '').trim();
+      const chats = filterChatsByQuery(Array.isArray(state.chats) ? state.chats : [], query);
+
+      if (!Array.isArray(chats) || chats.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.style.margin = 'auto 0';
+        empty.textContent = query ? '没有匹配的会话。' : '当前没有可转发的会话。';
+        list.appendChild(empty);
+        return;
+      }
+
+      for (const chat of chats) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'forward-target-card' + (messageForwardPicker.sendingChatId === chat.id ? ' sending' : '');
+
+        const avatar = document.createElement('div');
+        avatar.className = 'forward-target-avatar';
+        attachAvatarImage(avatar, {
+          url: chat.avatarUrl,
+          fallbackText: String(chat.title || '?').slice(0, 1),
+          imageClassName: 'avatar-img',
+        });
+
+        const meta = document.createElement('div');
+        meta.className = 'forward-target-meta';
+
+        const name = document.createElement('div');
+        name.className = 'forward-target-name';
+        name.textContent = String(chat.title || chat.id || '会话');
+
+        const sub = document.createElement('div');
+        sub.className = 'forward-target-sub';
+        sub.textContent = (chat.type === 'group' ? '群聊' : '私聊') + ' · ' + String(chat.targetId || '');
+
+        meta.appendChild(name);
+        meta.appendChild(sub);
+        button.appendChild(avatar);
+        button.appendChild(meta);
+
+        button.addEventListener('click', () => {
+          if (!messageForwardPicker.draft || messageForwardPicker.sendingChatId) {
+            return;
+          }
+          if (chat.id === String(state.selectedChatId || '')) {
+            forceScrollBottom = true;
+          }
+          messageForwardPicker.sendingChatId = chat.id;
+          renderMessageForwardPicker();
+
+          const draft = messageForwardPicker.draft;
+          if (draft.mode === 'json') {
+            vscode.postMessage({
+              type: 'sendJsonMessage',
+              chatId: chat.id,
+              rawJson: String(draft.rawJson || ''),
+              replyToMessageId: '',
+            });
+            closeMessageForwardPicker();
+            return;
+          }
+
+          if (draft.mode === 'message') {
+            (async () => {
+              const imageUrls = Array.isArray(draft.imageUrls) ? draft.imageUrls : [];
+              const images = [];
+              for (const url of imageUrls) {
+                try {
+                  const directDataUrl = String(url || '').trim();
+                  if (directDataUrl.startsWith('data:image/')) {
+                    images.push({
+                      name: 'image.png',
+                      dataUrl: directDataUrl,
+                    });
+                    continue;
+                  }
+                  const resolved = await requestResolveImageUrl(url);
+                  const dataUrl = String(resolved?.dataUrl || '').trim();
+                  if (!dataUrl.startsWith('data:image/')) {
+                    continue;
+                  }
+                  images.push({
+                    name: String(resolved?.name || 'image.png'),
+                    dataUrl,
+                  });
+                } catch (error) {
+                  logWeb('warn', 'forward picker image resolve failed: url=' + clipForLog(url) + ', reason=' + String(error?.message || error));
+                }
+              }
+
+              vscode.postMessage({
+                type: 'sendChatMessage',
+                chatId: chat.id,
+                text: String(draft.text || ''),
+                replyToMessageId: '',
+                images,
+              });
+              closeMessageForwardPicker();
+            })().catch((error) => {
+              logWeb('warn', 'forward picker send failed: ' + String(error?.message || error));
+              messageForwardPicker.sendingChatId = '';
+              renderMessageForwardPicker();
+            });
+            return;
+          }
+
+          messageForwardPicker.sendingChatId = '';
+          renderMessageForwardPicker();
+        });
+
+        list.appendChild(button);
+      }
+    }
+
     function renderCards() {
       const root = document.getElementById('cards');
       const count = document.getElementById('chatCount');
@@ -325,6 +493,7 @@ function renderListForwardScript() {
         }
         closeBubbleMenu();
         closeSettingsPanel();
+        closeMessageForwardPicker();
         pendingOpenChatId = '';
         state.selectedChatId = '';
         vscode.postMessage({ type: 'selectChat', chatId: '' });
@@ -351,6 +520,21 @@ function renderListForwardScript() {
         if (event.target === event.currentTarget) {
           closeForwardPreview();
         }
+      });
+
+      document.getElementById('btnCloseForwardPicker').addEventListener('click', () => {
+        closeMessageForwardPicker();
+      });
+
+      document.getElementById('forwardPickerOverlay').addEventListener('click', (event) => {
+        if (event.target === event.currentTarget) {
+          closeMessageForwardPicker();
+        }
+      });
+
+      document.getElementById('forwardPickerSearch').addEventListener('input', (event) => {
+        messageForwardPicker.query = String(event?.target?.value || '');
+        renderMessageForwardPicker();
       });
     }
   `;

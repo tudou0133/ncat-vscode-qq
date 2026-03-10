@@ -389,10 +389,88 @@ function renderMentionMenuScript() {
       bubbleMenuState.text = '';
       bubbleMenuState.hasImage = false;
       bubbleMenuState.canRecall = false;
+      bubbleMenuState.jumpTargetMessageId = '';
+      bubbleMenuState.jumpTargetLabel = '';
       const menu = document.getElementById('bubbleMenu');
       if (menu) {
         menu.hidden = true;
       }
+    }
+
+    function extractBubbleJumpTarget(msg) {
+      const segments = Array.isArray(msg?.segments) ? msg.segments : [];
+      for (const seg of segments) {
+        if (!seg || typeof seg !== 'object') {
+          continue;
+        }
+        if (seg.type === 'reply') {
+          const replyId = String(seg.replyId || '').trim();
+          if (replyId) {
+            return {
+              rawMessageId: replyId,
+              label: '引用消息',
+            };
+          }
+        }
+      }
+      for (const seg of segments) {
+        if (!seg || typeof seg !== 'object') {
+          continue;
+        }
+        if (seg.type === 'recall_notice') {
+          const recalledId = String(seg.recalledMessageId || '').trim();
+          if (recalledId) {
+            return {
+              rawMessageId: recalledId,
+              label: '被撤回消息',
+            };
+          }
+        }
+      }
+      return null;
+    }
+
+    function extractForwardableJsonRaw(msg) {
+      const segments = Array.isArray(msg?.segments) ? msg.segments : [];
+      for (const seg of segments) {
+        if (!seg || seg.type !== 'json') {
+          continue;
+        }
+        const raw = String(seg.raw || '').trim();
+        if (raw) {
+          return raw;
+        }
+      }
+      return '';
+    }
+
+    function buildForwardDraftFromMessage(msg) {
+      if (!msg) {
+        return null;
+      }
+      const jsonRaw = extractForwardableJsonRaw(msg);
+      if (jsonRaw) {
+        return {
+          mode: 'json',
+          rawJson: jsonRaw,
+          summary: '转发 JSON 消息',
+        };
+      }
+      const imageUrls = getMessageImageUrls(msg);
+      const text = getMessageActionText(msg, {
+        includeImagePlaceholder: false,
+        includeVideoPlaceholder: true,
+      });
+      const sendText = String(text || '').trim();
+      if (!sendText && imageUrls.length === 0) {
+        return null;
+      }
+      return {
+        mode: 'message',
+        text: sendText,
+        imageUrls,
+        summary: sendText ? clipForLog(sendText, 60) : ('转发 ' + String(imageUrls.length) + ' 张图片'),
+      };
     }
 
     function openBubbleMenu(payload, clientX, clientY) {
@@ -404,9 +482,14 @@ function renderMentionMenuScript() {
       const menu = document.getElementById('bubbleMenu');
       const saveStickerBtn = document.getElementById('bubbleMenuSaveSticker');
       const recallBtn = document.getElementById('bubbleMenuRecall');
+      const jumpBtn = document.getElementById('bubbleMenuJump');
+      const forwardBtn = document.getElementById('bubbleMenuForward');
       if (!menu) {
         return;
       }
+
+      const currentMsg = findMessageById(messageId);
+      const jumpTarget = currentMsg ? extractBubbleJumpTarget(currentMsg) : null;
 
       bubbleMenuState.open = true;
       bubbleMenuState.messageId = messageId;
@@ -415,11 +498,22 @@ function renderMentionMenuScript() {
       bubbleMenuState.text = String(payload?.text || '');
       bubbleMenuState.hasImage = !!payload?.hasImage;
       bubbleMenuState.canRecall = !!payload?.canRecall;
+      bubbleMenuState.jumpTargetMessageId = String(jumpTarget?.rawMessageId || '').trim();
+      bubbleMenuState.jumpTargetLabel = String(jumpTarget?.label || '').trim();
       if (saveStickerBtn) {
         saveStickerBtn.hidden = !bubbleMenuState.hasImage;
       }
       if (recallBtn) {
         recallBtn.hidden = !bubbleMenuState.canRecall;
+      }
+      if (jumpBtn) {
+        jumpBtn.hidden = !bubbleMenuState.jumpTargetMessageId;
+        if (bubbleMenuState.jumpTargetLabel) {
+          jumpBtn.textContent = '跳转到原消息';
+        }
+      }
+      if (forwardBtn) {
+        forwardBtn.hidden = false;
       }
 
       menu.hidden = false;
@@ -570,6 +664,35 @@ function renderMentionMenuScript() {
           preview,
         });
         closeBubbleMenu();
+      });
+
+      document.getElementById('bubbleMenuJump').addEventListener('click', () => {
+        const rawId = String(bubbleMenuState.jumpTargetMessageId || '').trim();
+        if (!rawId) {
+          closeBubbleMenu();
+          return;
+        }
+        const targetMsg = findMessageByRawMessageId(rawId);
+        const jumped = jumpToMessage(String(targetMsg?.id || ''), rawId);
+        if (!jumped) {
+          logWeb('warn', 'jump original message failed: rawMessageId=' + rawId);
+        }
+        closeBubbleMenu();
+      });
+
+      document.getElementById('bubbleMenuForward').addEventListener('click', () => {
+        const msg = findMessageById(bubbleMenuState.messageId);
+        closeBubbleMenu();
+        if (!msg) {
+          logWeb('warn', 'forward ignored: message not found');
+          return;
+        }
+        const draft = buildForwardDraftFromMessage(msg);
+        if (!draft) {
+          logWeb('warn', 'forward ignored: no forwardable content');
+          return;
+        }
+        openMessageForwardPicker(draft);
       });
 
       document.getElementById('bubbleMenuCopy').addEventListener('click', async () => {
