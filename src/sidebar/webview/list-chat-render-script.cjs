@@ -26,6 +26,7 @@ function renderListChatRenderScript() {
     function renderCards() {
       const root = document.getElementById('cards');
       const count = document.getElementById('chatCount');
+      const fragment = document.createDocumentFragment();
       root.innerHTML = '';
       if (!isPluginRunning()) {
         count.textContent = '0';
@@ -59,7 +60,8 @@ function renderListChatRenderScript() {
         empty.appendChild(title);
         empty.appendChild(text);
         empty.appendChild(action);
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         return;
       }
       const filteredChats = filterChatsByQuery(state.chats, searchQuery);
@@ -73,7 +75,8 @@ function renderListChatRenderScript() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = '暂无会话。先让 NCat 收到一条私聊或群消息。';
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         return;
       }
 
@@ -81,7 +84,8 @@ function renderListChatRenderScript() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = '当前会话未命中，正在搜索好友列表和群列表...';
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         return;
       }
 
@@ -91,7 +95,8 @@ function renderListChatRenderScript() {
         empty.textContent = searchQuery.trim()
           ? '当前会话、好友列表、群列表都没有命中。'
           : '未找到匹配会话，换个关键词试试。';
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         return;
       }
 
@@ -181,8 +186,9 @@ function renderListChatRenderScript() {
 
         card.appendChild(head);
         card.appendChild(preview);
-        root.appendChild(card);
+        fragment.appendChild(card);
       }
+      root.replaceChildren(fragment);
     }
 `;
 }

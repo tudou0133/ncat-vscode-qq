@@ -122,9 +122,23 @@ class NCatSidebarProvider {
     this.selectedChatId = '';
     this.searchQuery = '';
     this.stickerItemPathById = new Map();
+    this.pushStateTimer = null;
     this.disposable = runtime.onUiState(() => {
-      this.pushState();
+      this.schedulePushState();
     });
+  }
+
+  schedulePushState(delayMs = 24) {
+    if (!this.view) {
+      return;
+    }
+    if (this.pushStateTimer) {
+      return;
+    }
+    this.pushStateTimer = setTimeout(() => {
+      this.pushStateTimer = null;
+      this.pushState();
+    }, Math.max(0, Number(delayMs || 0)));
   }
 
   resolveWebviewView(webviewView) {
@@ -1226,6 +1240,10 @@ class NCatSidebarProvider {
   pushState() {
     if (!this.view) {
       return;
+    }
+    if (this.pushStateTimer) {
+      clearTimeout(this.pushStateTimer);
+      this.pushStateTimer = null;
     }
 
     if (this.selectedChatId) {

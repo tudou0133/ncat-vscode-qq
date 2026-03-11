@@ -1,7 +1,7 @@
 const { getPrivateAvatarUrl, getGroupAvatarUrl } = require('../core/avatar-utils.cjs');
 const { normalizeSegments, toMsTime } = require('../core/message-utils.cjs');
 
-const HISTORY_PRELOAD_CONCURRENCY = 4;
+const HISTORY_PRELOAD_CONCURRENCY = 6;
 
 function parseRecentContacts(runtime, response) {
   const data = response?.data;

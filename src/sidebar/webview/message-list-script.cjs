@@ -4,6 +4,7 @@ function renderMessageListScript() {
       const root = document.getElementById('messages');
       const prevBottomDistance = Math.max(0, root.scrollHeight - root.scrollTop - root.clientHeight);
       const wasNearBottom = prevBottomDistance <= 56;
+      const fragment = document.createDocumentFragment();
       root.innerHTML = '';
 
       if (!isPluginRunning()) {
@@ -29,7 +30,8 @@ function renderMessageListScript() {
         empty.appendChild(title);
         empty.appendChild(text);
         empty.appendChild(action);
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         lastRenderedChatId = '';
         lastRenderedMessageCount = 0;
         forceScrollBottom = false;
@@ -41,7 +43,8 @@ function renderMessageListScript() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = '在一级页面点开一个会话后，这里会覆盖显示二级消息页。';
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         lastRenderedChatId = '';
         lastRenderedMessageCount = 0;
         forceScrollBottom = false;
@@ -52,7 +55,8 @@ function renderMessageListScript() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = '当前会话还没有缓存消息。';
-        root.appendChild(empty);
+        fragment.appendChild(empty);
+        root.replaceChildren(fragment);
         lastRenderedChatId = selected.id;
         lastRenderedMessageCount = 0;
         forceScrollBottom = false;
@@ -72,7 +76,7 @@ function renderMessageListScript() {
         loading.style.padding = '6px 10px';
         loading.style.fontSize = '11px';
         loading.textContent = '正在加载更早消息...';
-        root.appendChild(loading);
+        fragment.appendChild(loading);
       }
 
       for (const msg of sortedMessages) {
@@ -82,7 +86,7 @@ function renderMessageListScript() {
           const lineText = getMessageActionText(msg) || '[系统消息]';
           line.textContent = lineText;
           line.title = lineText;
-          root.appendChild(line);
+          fragment.appendChild(line);
           continue;
         }
 
@@ -213,8 +217,10 @@ function renderMessageListScript() {
           row.appendChild(main);
         }
 
-        root.appendChild(row);
+        fragment.appendChild(row);
       }
+
+      root.replaceChildren(fragment);
 
       const currentChatId = selected.id;
       const currentCount = sortedMessages.length;
