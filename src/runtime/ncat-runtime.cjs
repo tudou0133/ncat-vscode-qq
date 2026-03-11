@@ -1202,6 +1202,9 @@ class NCatRuntime {
     this.chatSessions = new Map();
     this.uiListeners = new Set();
     this.persistTimer = null;
+    this.uiBatchDepth = 0;
+    this.uiBatchDirty = false;
+    this.persistBatchDirty = false;
     this.historyLoadInFlight = null;
     this.historyLoadedForConnection = false;
     this.historyIngestEpoch = 0;
@@ -1257,12 +1260,37 @@ class NCatRuntime {
   }
 
   emitUiUpdate() {
+    if (this.uiBatchDepth > 0) {
+      this.uiBatchDirty = true;
+      return;
+    }
     for (const listener of this.uiListeners) {
       try {
         listener();
       } catch (error) {
         this.log(`UI listener error: ${error?.message || String(error)}`);
       }
+    }
+  }
+
+  beginBatchedUpdates() {
+    this.uiBatchDepth += 1;
+  }
+
+  endBatchedUpdates() {
+    if (this.uiBatchDepth > 0) {
+      this.uiBatchDepth -= 1;
+    }
+    if (this.uiBatchDepth > 0) {
+      return;
+    }
+    if (this.uiBatchDirty) {
+      this.uiBatchDirty = false;
+      this.emitUiUpdate();
+    }
+    if (this.persistBatchDirty) {
+      this.persistBatchDirty = false;
+      this.schedulePersistCache();
     }
   }
 
@@ -2819,6 +2847,10 @@ class NCatRuntime {
   }
 
   schedulePersistCache() {
+    if (this.uiBatchDepth > 0) {
+      this.persistBatchDirty = true;
+      return;
+    }
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
     }
@@ -3355,9 +3387,6 @@ class NCatRuntime {
       displayStyle: 'system',
       countUnread: true,
     });
-    if (appended) {
-      this.log(`backend gray tip ingested: chat=${chatId}, text=${displayText}`);
-    }
     return appended;
   }
 
@@ -3524,6 +3553,57 @@ class NCatRuntime {
     const session = this.upsertSession({ chatId, type, targetId, title, avatarUrl });
     const ts = timestamp || Date.now();
     const preview = toBrief(segments);
+    const normalizedRawMessageId = String(rawMessageId || messageId || '').trim();
+
+    if (String(direction || '') === 'out') {
+      if (normalizedRawMessageId && session.messageIdIndex instanceof Map && session.messageIdIndex.has(normalizedRawMessageId)) {
+        return session.messageIdIndex.get(normalizedRawMessageId);
+      }
+
+      for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+        const existing = session.messages[i];
+        if (!existing || String(existing.direction || '') !== 'out') {
+          continue;
+        }
+        if (String(existing.senderId || '') !== String(senderId || '')) {
+          continue;
+        }
+        const delta = Math.abs(Number(existing.timestamp || 0) - ts);
+        if (delta > 15_000) {
+          continue;
+        }
+        if (toBrief(Array.isArray(existing.segments) ? existing.segments : []) !== preview) {
+          continue;
+        }
+        const existingRawId = String(existing.rawMessageId || '').trim();
+        const shouldMergePending =
+          (!existingRawId && !normalizedRawMessageId) ||
+          (!existingRawId && !!normalizedRawMessageId);
+        if (!shouldMergePending) {
+          continue;
+        }
+
+        if (!existingRawId && normalizedRawMessageId) {
+          const prevKey = String(existing.messageKey || '').trim();
+          const nextKey = `mid:${normalizedRawMessageId}`;
+          if (prevKey) {
+            session.seenKeys.delete(prevKey);
+          }
+          existing.rawMessageId = normalizedRawMessageId;
+          existing.messageKey = nextKey;
+          existing.timestamp = ts;
+          existing.segments = segments;
+          session.seenKeys.add(nextKey);
+          session.messageIdIndex.set(normalizedRawMessageId, existing);
+          session.lastTs = Math.max(session.lastTs, ts);
+          session.preview = preview;
+          this.emitUiUpdate();
+          this.schedulePersistCache();
+        }
+        return existing;
+      }
+    }
+
     const messageKey = messageId
       ? `mid:${messageId}`
       : `ts:${ts}|dir:${direction}|from:${String(senderId || '')}|p:${preview}`;
@@ -3558,6 +3638,112 @@ class NCatRuntime {
       session.unread += 1;
     }
 
+    this.emitUiUpdate();
+    this.schedulePersistCache();
+    return message;
+  }
+
+  updateSessionMessageRawId(chatId, localMessageId, rawMessageId) {
+    const session = this.chatSessions.get(String(chatId || ''));
+    if (!session) {
+      return false;
+    }
+    const localId = String(localMessageId || '').trim();
+    const rawId = String(rawMessageId || '').trim();
+    if (!localId || !rawId) {
+      return false;
+    }
+    const target = session.messages.find((item) => String(item?.id || '') === localId);
+    if (!target) {
+      return false;
+    }
+    const prevKey = String(target.messageKey || '').trim();
+    const nextKey = `mid:${rawId}`;
+    if (prevKey) {
+      session.seenKeys.delete(prevKey);
+    }
+    target.rawMessageId = rawId;
+    target.messageKey = nextKey;
+    session.seenKeys.add(nextKey);
+    session.messageIdIndex.set(rawId, target);
+    this.schedulePersistCache();
+    return true;
+  }
+
+  reconcilePendingOutgoingMessage(chatId, payload = {}) {
+    const session = this.chatSessions.get(String(chatId || ''));
+    if (!session) {
+      return false;
+    }
+    const rawId = String(payload.rawMessageId || '').trim();
+    if (!rawId) {
+      return false;
+    }
+    const nextSegments = Array.isArray(payload.segments) ? payload.segments : [];
+    const nextPreview = toBrief(nextSegments);
+    const nextTimestamp = Number(payload.timestamp || 0) || Date.now();
+
+    for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+      const target = session.messages[i];
+      if (!target || String(target.direction || '') !== 'out' || String(target.rawMessageId || '').trim()) {
+        continue;
+      }
+      const delta = Math.abs(Number(target.timestamp || 0) - nextTimestamp);
+      if (delta > 15_000) {
+        continue;
+      }
+      if (toBrief(Array.isArray(target.segments) ? target.segments : []) !== nextPreview) {
+        continue;
+      }
+
+      const prevKey = String(target.messageKey || '').trim();
+      const nextKey = `mid:${rawId}`;
+      if (prevKey) {
+        session.seenKeys.delete(prevKey);
+      }
+      target.messageKey = nextKey;
+      target.rawMessageId = rawId;
+      target.timestamp = nextTimestamp;
+      target.segments = nextSegments.length > 0 ? nextSegments : target.segments;
+      target.senderId = String(payload.senderId || target.senderId || '');
+      target.senderName = String(payload.senderName || target.senderName || '');
+      target.senderAvatarUrl = String(payload.senderAvatarUrl || target.senderAvatarUrl || '');
+      session.seenKeys.add(nextKey);
+      session.messageIdIndex.set(rawId, target);
+      session.lastTs = Math.max(Number(session.lastTs || 0), nextTimestamp);
+      session.preview = nextPreview;
+      this.emitUiUpdate();
+      this.schedulePersistCache();
+      return true;
+    }
+
+    return false;
+  }
+
+  removeSessionMessageById(chatId, localMessageId) {
+    const session = this.chatSessions.get(String(chatId || ''));
+    if (!session) {
+      return false;
+    }
+    const localId = String(localMessageId || '').trim();
+    if (!localId) {
+      return false;
+    }
+    const index = session.messages.findIndex((item) => String(item?.id || '') === localId);
+    if (index < 0) {
+      return false;
+    }
+    const [removed] = session.messages.splice(index, 1);
+    if (removed?.messageKey) {
+      session.seenKeys.delete(String(removed.messageKey));
+    }
+    if (removed?.rawMessageId) {
+      session.messageIdIndex.delete(String(removed.rawMessageId));
+    }
+    this.pruneSessionMessages(session);
+    if (session.messages.length === 0) {
+      this.chatSessions.delete(session.id);
+    }
     this.emitUiUpdate();
     this.schedulePersistCache();
     return true;
@@ -3618,9 +3804,6 @@ class NCatRuntime {
       const hasElement9 = /elementtype[^0-9]*9/i.test(JSON.stringify(payload || {}));
       const backendHint = this.consumeBackendUnsupportedHint(chatId, 15_000);
       const backendHintType = Number(backendHint?.elementType);
-      this.log(
-        `incoming message empty segments: chat=${chatId}, raw_len=${rawMsg.length}, hasElement9=${hasElement9}, backendHint=${Number.isFinite(backendHintType) ? backendHintType : 'none'}, types=${debugType}`
-      );
       if (hasElement9 || backendHintType === 9) {
         segments.push({
           type: 'red_packet',
@@ -3649,20 +3832,40 @@ class NCatRuntime {
       });
     }
 
+    const incomingDirection =
+      senderId && this.selfUserId && senderId === String(this.selfUserId)
+        ? 'out'
+        : 'in';
+    const incomingTs = toMsTime(payload?.time);
+    const incomingRawMessageId = payload?.message_id ? String(payload.message_id) : '';
+    if (incomingDirection === 'out' && incomingRawMessageId) {
+      const reconciled = this.reconcilePendingOutgoingMessage(chatId, {
+        rawMessageId: incomingRawMessageId,
+        timestamp: incomingTs,
+        segments,
+        senderId,
+        senderName,
+        senderAvatarUrl: getPrivateAvatarUrl(senderId),
+      });
+      if (reconciled) {
+        return;
+      }
+    }
+
     this.appendMessageToSession({
       chatId,
       type: messageType,
       targetId,
       title,
       avatarUrl,
-      direction: 'in',
+      direction: incomingDirection,
       senderId,
       senderName,
       senderAvatarUrl: getPrivateAvatarUrl(senderId),
       segments,
-      timestamp: toMsTime(payload?.time),
-      messageId: payload?.message_id ? String(payload.message_id) : '',
-      rawMessageId: payload?.message_id ? String(payload.message_id) : '',
+      timestamp: incomingTs,
+      messageId: incomingRawMessageId,
+      rawMessageId: incomingRawMessageId,
     });
 
     const brief = toBrief(segments);
@@ -4347,18 +4550,31 @@ class NCatRuntime {
       throw new Error('Message is empty.');
     }
 
+    const sessionId = `private:${String(userId)}`;
+    const localEcho = this.appendOutgoingPrivate(userId, composed, '');
     this.log(`send_private_msg -> user_id=${userId}, text_len=${composed.text.length}, images=${composed.images.length}`);
-    const response = await this.callApi('send_private_msg', {
-      user_id: Number(userId),
-      message: buildOneBotMessage(composed),
-    });
+    try {
+      const response = await this.callApi('send_private_msg', {
+        user_id: Number(userId),
+        message: buildOneBotMessage(composed),
+      });
 
-    if (response?.status !== 'ok') {
-      throw new Error(response?.wording || response?.message || 'Unknown NCat error.');
+      if (response?.status !== 'ok') {
+        throw new Error(response?.wording || response?.message || 'Unknown NCat error.');
+      }
+
+      if (localEcho?.id) {
+        this.updateSessionMessageRawId(sessionId, localEcho.id, response?.data?.message_id);
+      } else {
+        this.appendOutgoingPrivate(userId, composed, response?.data?.message_id);
+      }
+      return response;
+    } catch (error) {
+      if (localEcho?.id) {
+        this.removeSessionMessageById(sessionId, localEcho.id);
+      }
+      throw error;
     }
-
-    this.appendOutgoingPrivate(userId, composed, response?.data?.message_id);
-    return response;
   }
 
   async sendGroupMessage(groupId, message) {
@@ -4372,18 +4588,31 @@ class NCatRuntime {
       throw new Error('Message is empty.');
     }
 
+    const sessionId = `group:${String(groupId)}`;
+    const localEcho = this.appendOutgoingGroup(groupId, composed, '');
     this.log(`send_group_msg -> group_id=${groupId}, text_len=${composed.text.length}, images=${composed.images.length}`);
-    const response = await this.callApi('send_group_msg', {
-      group_id: Number(groupId),
-      message: buildOneBotMessage(composed),
-    });
+    try {
+      const response = await this.callApi('send_group_msg', {
+        group_id: Number(groupId),
+        message: buildOneBotMessage(composed),
+      });
 
-    if (response?.status !== 'ok') {
-      throw new Error(response?.wording || response?.message || 'Unknown NCat error.');
+      if (response?.status !== 'ok') {
+        throw new Error(response?.wording || response?.message || 'Unknown NCat error.');
+      }
+
+      if (localEcho?.id) {
+        this.updateSessionMessageRawId(sessionId, localEcho.id, response?.data?.message_id);
+      } else {
+        this.appendOutgoingGroup(groupId, composed, response?.data?.message_id);
+      }
+      return response;
+    } catch (error) {
+      if (localEcho?.id) {
+        this.removeSessionMessageById(sessionId, localEcho.id);
+      }
+      throw error;
     }
-
-    this.appendOutgoingGroup(groupId, composed, response?.data?.message_id);
-    return response;
   }
 
   async sendMessageToChat(chatId, message) {
@@ -5144,7 +5373,6 @@ class NCatRuntime {
     }
 
     const socket = this.ws;
-    this.log('Waiting for WebSocket open...');
 
     return new Promise((resolve) => {
       const finish = (result) => {
