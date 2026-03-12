@@ -323,6 +323,18 @@ function renderWebviewBaseStyles() {
       overscroll-behavior: contain;
     }
 
+    .detail-notice {
+      margin: 8px 10px 0;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(234, 179, 8, 0.28);
+      background: rgba(83, 58, 12, 0.28);
+      color: #f9df9a;
+      font-size: 11px;
+      line-height: 1.45;
+      flex: 0 0 auto;
+    }
+
     .cards,
     .messages {
       scrollbar-width: auto;

@@ -14,6 +14,7 @@ function renderStateInitScript() {
       selectedChatId: '',
       selectedChatType: '',
       selectedTargetId: '',
+      selectedChatIsFriend: false,
       selectedMembers: [],
       selectedMessages: [],
       isLoadingOlder: false,
@@ -101,6 +102,7 @@ function renderStateInitScript() {
       nodes: [],
       error: '',
     };
+    let forwardPreviewStack = [];
     let messageForwardPicker = {
       open: false,
       query: '',

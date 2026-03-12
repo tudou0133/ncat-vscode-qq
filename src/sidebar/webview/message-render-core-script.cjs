@@ -166,6 +166,11 @@ ${renderMessageRenderMediaSegmentsScript()}
         const clickable = !!String(seg.forwardId || '').trim();
         const forward = document.createElement(clickable ? 'button' : 'span');
         forward.className = 'seg-forward' + (clickable ? ' clickable' : '');
+        const previewLines = Array.isArray(seg.previewLines) ? seg.previewLines.filter(Boolean).slice(0, 4) : [];
+        const rawTitle = String(seg.text || '').trim();
+        const displayTitle = /^\[(合并转发|长消息)(?:\s*#.*)?\]$/.test(rawTitle)
+          ? (previewLines.length > 0 ? '聊天记录' : '合并转发')
+          : (rawTitle || (previewLines.length > 0 ? '聊天记录' : '合并转发'));
         if (clickable) {
           forward.type = 'button';
           forward.title = '点击查看合并转发';
@@ -175,7 +180,21 @@ ${renderMessageRenderMediaSegmentsScript()}
             openForwardPreview(seg.forwardId, seg.text || '[合并转发]');
           });
         }
-        forward.textContent = seg.text || '[合并转发]';
+        const title = document.createElement('span');
+        title.className = 'seg-forward-title';
+        title.textContent = displayTitle;
+        forward.appendChild(title);
+        if (previewLines.length > 0) {
+          const preview = document.createElement('span');
+          preview.className = 'seg-forward-preview';
+          for (const lineText of previewLines) {
+            const line = document.createElement('span');
+            line.className = 'seg-forward-preview-line';
+            line.textContent = String(lineText || '');
+            preview.appendChild(line);
+          }
+          forward.appendChild(preview);
+        }
         return forward;
       }
 

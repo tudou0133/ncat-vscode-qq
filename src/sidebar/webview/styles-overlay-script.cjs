@@ -37,14 +37,40 @@ function renderWebviewOverlayStyles() {
       background: rgba(255, 255, 255, 0.02);
     }
 
+    .forward-topbar-left {
+      min-width: 0;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .forward-title {
       min-width: 0;
+      flex: 1;
       font-size: 12px;
       font-weight: 700;
       color: #e9f0fb;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .forward-nav-btn {
+      height: 28px;
+      border-radius: 9px;
+      border: 1px solid rgba(86, 111, 150, 0.88);
+      background: rgba(13, 24, 40, 0.96);
+      color: #e8f1ff;
+      padding: 0 10px;
+      font-size: 11px;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .forward-nav-btn:hover {
+      border-color: rgba(126, 162, 213, 0.95);
+      background: rgba(19, 34, 56, 0.98);
     }
 
     .forward-body {

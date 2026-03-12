@@ -1229,6 +1229,8 @@ class NCatRuntime {
     this.backendLastWsReadyAt = 0;
     this.backendUnsupportedHints = new Map();
     this.recentRedPacketByChat = new Map();
+    this.forwardSummaryCache = new Map();
+    this.pendingForwardSummaryLoads = new Map();
     this.mediaRetryNoRetryIds = new Set();
     this.detectedBackendWebUrl = '';
     this.detectedBackendWebToken = '';
@@ -3463,6 +3465,8 @@ class NCatRuntime {
     const directoryResults = shouldUseDirectory ? this.searchDirectory(q, 30) : [];
     const selectedChatType = selectedSession ? selectedSession.type : '';
     const selectedTargetId = selectedSession ? String(selectedSession.targetId || '') : '';
+    const selectedChatIsFriend =
+      selectedChatType === 'private' && !!selectedTargetId && this.contactDirectory.has(`private:${selectedTargetId}`);
     const selectedMembers = selectedChatType === 'group'
       ? this.getGroupMembers(selectedTargetId).map((item) => ({
           userId: item.userId,
@@ -3471,6 +3475,9 @@ class NCatRuntime {
           nickname: item.nickname || '',
         }))
       : [];
+    if (selectedChatType === 'private' && selectedTargetId && !this.contactDirectoryLoaded && !this.contactDirectoryLoading && this.isConnected()) {
+      this.refreshContactDirectory(false).catch(() => {});
+    }
     if (selectedChatType === 'group' && selectedTargetId && !this.groupMembersByGroupId.has(selectedTargetId) && !this.groupMembersLoading.has(selectedTargetId) && this.isConnected()) {
       this.ensureGroupMembers(selectedTargetId, false).catch(() => {});
     }
@@ -3513,6 +3520,7 @@ class NCatRuntime {
       selectedChatId,
       selectedChatType,
       selectedTargetId,
+      selectedChatIsFriend,
       selectedMembers,
       selectedMessages: selectedSession
         ? selectedSession.messages.map((msg) => ({
@@ -5348,6 +5356,103 @@ class NCatRuntime {
 
   async getForwardPreview(forwardId, context = {}) {
     return getForwardPreview(this, forwardId, context);
+  }
+
+  getForwardSummary(forwardId) {
+    const key = String(forwardId || '').trim();
+    if (!key) {
+      return null;
+    }
+    return this.forwardSummaryCache.get(key) || null;
+  }
+
+  summarizeForwardPreview(preview) {
+    const nodes = Array.isArray(preview?.nodes) ? preview.nodes : [];
+    const lines = [];
+    for (const node of nodes.slice(0, 4)) {
+      const sender = String(node?.senderName || node?.senderId || '').trim();
+      const text = clipText(toBrief(Array.isArray(node?.segments) ? node.segments : []), 72);
+      if (sender && text) {
+        lines.push(`${sender}: ${text}`);
+      } else if (text) {
+        lines.push(text);
+      } else if (sender) {
+        lines.push(sender);
+      }
+    }
+    return lines.filter(Boolean);
+  }
+
+  applyForwardSummaryToSessions(forwardId, summary) {
+    const key = String(forwardId || '').trim();
+    if (!key || !summary || !Array.isArray(summary.lines) || summary.lines.length === 0) {
+      return false;
+    }
+    let changed = false;
+    for (const session of this.chatSessions.values()) {
+      const messages = Array.isArray(session?.messages) ? session.messages : [];
+      for (const message of messages) {
+        const segments = Array.isArray(message?.segments) ? message.segments : [];
+        for (const seg of segments) {
+          if (!seg || seg.type !== 'forward' || String(seg.forwardId || '').trim() !== key) {
+            continue;
+          }
+          const current = Array.isArray(seg.previewLines) ? seg.previewLines : [];
+          const sameLength = current.length === summary.lines.length;
+          const sameContent = sameLength && current.every((item, index) => item === summary.lines[index]);
+          if (sameContent) {
+            continue;
+          }
+          seg.previewLines = summary.lines.slice();
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  async ensureForwardSummary(forwardId, context = {}) {
+    const key = String(forwardId || '').trim();
+    if (!key) {
+      return null;
+    }
+    const cached = this.forwardSummaryCache.get(key);
+    if (cached && Array.isArray(cached.lines) && cached.lines.length > 0) {
+      return cached;
+    }
+    if (this.pendingForwardSummaryLoads.has(key)) {
+      return this.pendingForwardSummaryLoads.get(key);
+    }
+    if (!this.isConnected()) {
+      return null;
+    }
+
+    const loading = (async () => {
+      try {
+        const preview = await this.getForwardPreview(key, context);
+        const summary = {
+          forwardId: key,
+          title: String(preview?.title || '').trim(),
+          lines: this.summarizeForwardPreview(preview),
+        };
+        if (summary.lines.length > 0) {
+          this.forwardSummaryCache.set(key, summary);
+          if (this.applyForwardSummaryToSessions(key, summary)) {
+            this.emitUiUpdate();
+            this.schedulePersistCache();
+          }
+        }
+        return summary;
+      } catch (error) {
+        this.log(`forward summary preload skipped: forwardId=${key}, reason=${error?.message || String(error)}`);
+        return null;
+      } finally {
+        this.pendingForwardSummaryLoads.delete(key);
+      }
+    })();
+
+    this.pendingForwardSummaryLoads.set(key, loading);
+    return loading;
   }
 
   async ensureConnected(timeoutMs = 7000) {

@@ -1,5 +1,65 @@
 function renderMessageRenderMediaSegmentsScript() {
   return String.raw`
+    function getFileIconMeta(fileName) {
+      const name = String(fileName || '').trim();
+      const m = name.match(/\.([a-z0-9]{1,10})$/i);
+      const ext = m ? String(m[1] || '').toLowerCase() : '';
+      if (!ext) {
+        return { kind: 'folder', label: '' };
+      }
+
+      if (ext === 'png') {
+        return { kind: 'image-png', label: 'PNG' };
+      }
+      if (ext === 'jpg' || ext === 'jpeg') {
+        return { kind: 'image-jpg', label: ext === 'jpg' ? 'JPG' : 'JPEG' };
+      }
+      if (ext === 'gif') {
+        return { kind: 'image-gif', label: 'GIF' };
+      }
+      if (['webp', 'bmp', 'svg', 'ico', 'heic', 'avif'].includes(ext)) {
+        return { kind: 'image-other', label: ext.toUpperCase() };
+      }
+      if (ext === 'mp4') {
+        return { kind: 'video-mp4', label: 'MP4' };
+      }
+      if (['mkv', 'avi', 'mov', 'wmv', 'webm', 'flv', 'm4v'].includes(ext)) {
+        return { kind: 'video-other', label: ext.toUpperCase() };
+      }
+      if (ext === 'mp3') {
+        return { kind: 'audio-mp3', label: 'MP3' };
+      }
+      if (['wav', 'flac', 'aac', 'ogg', 'm4a', 'wma'].includes(ext)) {
+        return { kind: 'audio-other', label: ext.toUpperCase() };
+      }
+      if (ext === 'zip') {
+        return { kind: 'archive-zip', label: 'ZIP' };
+      }
+      if (['7z', 'rar', 'tar', 'gz', 'bz2', 'xz'].includes(ext)) {
+        return { kind: 'archive-other', label: ext.toUpperCase() };
+      }
+      if (ext === 'pdf') {
+        return { kind: 'pdf', label: ext.toUpperCase() };
+      }
+      if (ext === 'doc' || ext === 'docx') {
+        return { kind: 'doc-word', label: ext.toUpperCase() };
+      }
+      if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') {
+        return { kind: 'doc-sheet', label: ext.toUpperCase() };
+      }
+      if (ext === 'ppt' || ext === 'pptx') {
+        return { kind: 'doc-slide', label: ext.toUpperCase() };
+      }
+      if (ext === 'txt' || ext === 'md') {
+        return { kind: 'text', label: ext.toUpperCase() };
+      }
+      if (['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'ini', 'log', 'cfg', 'conf', 'c', 'cpp', 'h', 'hpp', 'py', 'js', 'ts', 'tsx', 'jsx', 'java', 'go', 'rs', 'sh', 'bat'].includes(ext)) {
+        return { kind: 'code', label: ext.toUpperCase() };
+      }
+
+      return { kind: 'folder', label: '' };
+    }
+
     function buildMediaSegment(seg, imageMeta, messageMeta) {
       if (seg.type === 'image') {
         const chip = document.createElement('span');
@@ -199,13 +259,30 @@ function renderMessageRenderMediaSegmentsScript() {
         const file = document.createElement('span');
         file.className = 'seg-file';
         file.title = String(seg.text || seg.name || '[文件]');
+        const iconMeta = getFileIconMeta(seg.name || '');
 
         const icon = document.createElement('span');
         icon.className = 'seg-file-icon';
-        const folder = document.createElement('span');
-        folder.className = 'seg-file-folder';
-        folder.setAttribute('aria-hidden', 'true');
-        icon.appendChild(folder);
+        if (iconMeta.kind === 'folder') {
+          const folder = document.createElement('span');
+          folder.className = 'seg-file-folder';
+          folder.setAttribute('aria-hidden', 'true');
+          icon.appendChild(folder);
+        } else {
+          const badge = document.createElement('span');
+          badge.className = 'seg-file-badge seg-file-badge-' + iconMeta.kind;
+          badge.dataset.kind = iconMeta.kind;
+          const emblem = document.createElement('span');
+          emblem.className = 'seg-file-badge-emblem';
+          emblem.setAttribute('aria-hidden', 'true');
+          const label = document.createElement('span');
+          label.className = 'seg-file-badge-label';
+          label.textContent = iconMeta.label || 'FILE';
+          badge.appendChild(emblem);
+          badge.appendChild(label);
+          badge.setAttribute('aria-hidden', 'true');
+          icon.appendChild(badge);
+        }
         file.appendChild(icon);
 
         const meta = document.createElement('span');

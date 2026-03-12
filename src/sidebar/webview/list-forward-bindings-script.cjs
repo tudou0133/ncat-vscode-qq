@@ -53,6 +53,10 @@ function renderListForwardBindingsScript() {
         closeForwardPreview();
       });
 
+      document.getElementById('btnBackForward').addEventListener('click', () => {
+        goBackForwardPreview();
+      });
+
       document.getElementById('forwardOverlay').addEventListener('click', (event) => {
         if (event.target === event.currentTarget) {
           closeForwardPreview();

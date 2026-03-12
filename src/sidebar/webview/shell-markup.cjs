@@ -36,6 +36,7 @@ function renderShellMarkup() {
           <button id="btnSettings2" type="button">设置</button>
         </div>
       </div>
+      <div id="detailNotice" class="detail-notice" hidden></div>
       <div id="messages" class="messages"></div>
       <div class="composer">
         <input id="composerFilePicker" type="file" accept="image/*" multiple style="display:none" />
@@ -69,8 +70,11 @@ function renderShellMarkup() {
   <div id="forwardOverlay" class="forward-overlay" aria-hidden="true">
     <div class="forward-panel">
       <div class="forward-topbar">
-        <div id="forwardTitle" class="forward-title">合并转发</div>
-        <button id="btnCloseForward" type="button">关闭</button>
+        <div class="forward-topbar-left">
+          <button id="btnBackForward" class="forward-nav-btn" type="button" hidden>返回上一级</button>
+          <div id="forwardTitle" class="forward-title">合并转发</div>
+        </div>
+        <button id="btnCloseForward" class="forward-nav-btn" type="button">关闭</button>
       </div>
       <div id="forwardBody" class="forward-body"></div>
     </div>

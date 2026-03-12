@@ -141,10 +141,14 @@ function renderListForwardOverlayRenderScript() {
       const overlay = document.getElementById('forwardOverlay');
       const titleNode = document.getElementById('forwardTitle');
       const body = document.getElementById('forwardBody');
+      const backButton = document.getElementById('btnBackForward');
 
       overlay.classList.toggle('open', !!forwardPreview.open);
       overlay.setAttribute('aria-hidden', forwardPreview.open ? 'false' : 'true');
       titleNode.textContent = forwardPreview.title || '合并转发';
+      if (backButton) {
+        backButton.hidden = !Array.isArray(forwardPreviewStack) || forwardPreviewStack.length === 0;
+      }
       body.innerHTML = '';
 
       if (!forwardPreview.open) {

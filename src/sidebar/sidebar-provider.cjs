@@ -208,6 +208,36 @@ class NCatSidebarProvider {
         return;
       }
 
+      if (msg.type === 'openPrivateChatFromAvatar') {
+        const targetId = String(msg.targetId || '').trim();
+        if (!targetId) {
+          return;
+        }
+
+        const chatId = `private:${targetId}`;
+        try {
+          const title = String(
+            msg.title ||
+            this.runtime.getDisplayName(targetId) ||
+            `QQ ${targetId}`
+          ).trim();
+          await this.runtime.ensureChatSession({
+            type: 'private',
+            targetId,
+            title,
+            avatarUrl: '',
+          });
+          this.selectedChatId = chatId;
+          this.runtime.markChatRead(chatId);
+          this.pushState();
+        } catch (error) {
+          const reason = error?.message || String(error);
+          this.runtime.log(`openPrivateChatFromAvatar failed: chatId=${chatId}, reason=${reason}`);
+          vscode.window.showErrorMessage(`打开私聊失败: ${reason}`);
+        }
+        return;
+      }
+
       if (msg.type === 'connect') {
         await this.runtime.startPluginRuntime({
           silent: false,

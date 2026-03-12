@@ -8,6 +8,7 @@ function renderListForwardScript() {
 ${renderListForwardRenderScript()}
 
     function closeForwardPreview() {
+      forwardPreviewStack = [];
       forwardPreview = {
         open: false,
         loading: false,
@@ -19,10 +20,40 @@ ${renderListForwardRenderScript()}
       renderForwardPreview();
     }
 
+    function goBackForwardPreview() {
+      if (!Array.isArray(forwardPreviewStack) || forwardPreviewStack.length === 0) {
+        closeForwardPreview();
+        return;
+      }
+      const previous = forwardPreviewStack.pop();
+      forwardPreview = previous && typeof previous === 'object'
+        ? previous
+        : {
+            open: false,
+            loading: false,
+            forwardId: '',
+            title: '合并转发',
+            nodes: [],
+            error: '',
+          };
+      renderForwardPreview();
+    }
+
     function openForwardPreview(forwardId, fallbackTitle) {
       const value = String(forwardId || '').trim();
       if (!value) {
         return;
+      }
+      const currentId = String(forwardPreview.forwardId || '').trim();
+      if (forwardPreview.open && currentId && currentId !== value) {
+        forwardPreviewStack.push({
+          open: true,
+          loading: !!forwardPreview.loading,
+          forwardId: currentId,
+          title: String(forwardPreview.title || '合并转发'),
+          nodes: Array.isArray(forwardPreview.nodes) ? forwardPreview.nodes : [],
+          error: String(forwardPreview.error || ''),
+        });
       }
       forwardPreview = {
         open: true,

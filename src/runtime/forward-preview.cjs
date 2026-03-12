@@ -82,10 +82,18 @@ async function callGetForwardMsg(runtime, forwardId) {
     try {
       const response = await runtime.callApi('get_forward_msg', attempt.params);
       const nodes = extractForwardNodes(response);
-      runtime.log(`get_forward_msg success: forwardId=${value}, via=${attempt.label}, nodes=${nodes.length}`);
-      if (nodes.length > 0 || response?.status === 'ok') {
+      const status = String(response?.status || '').trim().toLowerCase();
+      if (status === 'ok' && nodes.length > 0) {
+        runtime.log(`get_forward_msg success: forwardId=${value}, via=${attempt.label}, nodes=${nodes.length}`);
         return response;
       }
+      const reason = String(response?.wording || response?.message || '').trim();
+      if (status === 'failed' || reason) {
+        lastError = new Error(reason || 'get_forward_msg failed');
+        runtime.log(`get_forward_msg failed: forwardId=${value}, via=${attempt.label}, reason=${lastError.message}`);
+        continue;
+      }
+      runtime.log(`get_forward_msg empty: forwardId=${value}, via=${attempt.label}, nodes=${nodes.length}`);
     } catch (error) {
       lastError = error;
       runtime.log(`get_forward_msg failed: forwardId=${value}, via=${attempt.label}, reason=${error?.message || String(error)}`);
@@ -134,6 +142,7 @@ async function getForwardPreview(runtime, forwardId, context = {}) {
       targetId,
       chatId,
       allowRemoteLookup: false,
+      prefetchForwardPreview: false,
     });
 
     if (segments.length === 0) {

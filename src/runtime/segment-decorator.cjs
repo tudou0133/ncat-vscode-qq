@@ -217,6 +217,7 @@ async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
   const groupId = context.chatType === 'group' ? String(context.targetId || '') : '';
   const session = context.chatId ? runtime.chatSessions.get(String(context.chatId)) : null;
   const allowRemoteLookup = context.allowRemoteLookup !== false;
+  const allowForwardPrefetch = context.prefetchForwardPreview !== false;
 
   for (const seg of segments) {
     if (!seg || typeof seg !== 'object') {
@@ -285,6 +286,23 @@ async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
         replyName: refName,
         replyPreview: refPreview,
         replySegments,
+      });
+      continue;
+    }
+
+    if (seg.type === 'forward') {
+      const forwardId = String(seg.forwardId || '').trim();
+      const summary = forwardId ? runtime.getForwardSummary(forwardId) : null;
+      if (forwardId && !summary && allowForwardPrefetch) {
+        runtime.ensureForwardSummary(forwardId, {
+          chatType: context.chatType || '',
+          targetId: context.targetId || '',
+          chatId: context.chatId || '',
+        }).catch(() => {});
+      }
+      out.push({
+        ...seg,
+        previewLines: Array.isArray(summary?.lines) ? summary.lines : [],
       });
       continue;
     }

@@ -39,7 +39,12 @@ function renderMessageListScript() {
       }
 
       const selected = getSelectedChat();
+      const detailNotice = document.getElementById('detailNotice');
       if (!selected) {
+        if (detailNotice) {
+          detailNotice.hidden = true;
+          detailNotice.textContent = '';
+        }
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = '在一级页面点开一个会话后，这里会覆盖显示二级消息页。';
@@ -52,6 +57,15 @@ function renderMessageListScript() {
       }
 
       if (!state.selectedMessages || state.selectedMessages.length === 0) {
+        if (detailNotice) {
+          if (selected.type === 'private' && !state.selectedChatIsFriend) {
+            detailNotice.hidden = false;
+            detailNotice.textContent = '当前对象不在好友列表中。这是临时私聊会话，目前仅支持聊天查看与发送；主动加好友请在 QQ 客户端中操作。';
+          } else {
+            detailNotice.hidden = true;
+            detailNotice.textContent = '';
+          }
+        }
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = '当前会话还没有缓存消息。';
@@ -68,6 +82,16 @@ function renderMessageListScript() {
         const t2 = Number(b.timestamp || 0);
         return t1 - t2;
       });
+
+      if (detailNotice) {
+        if (selected.type === 'private' && !state.selectedChatIsFriend) {
+          detailNotice.hidden = false;
+          detailNotice.textContent = '当前对象不在好友列表中。这是临时私聊会话，目前仅支持聊天查看与发送；主动加好友请在 QQ 客户端中操作。';
+        } else {
+          detailNotice.hidden = true;
+          detailNotice.textContent = '';
+        }
+      }
 
       if (state.isLoadingOlder) {
         const loading = document.createElement('div');
@@ -142,6 +166,18 @@ function renderMessageListScript() {
               event.clientX,
               event.clientY
             );
+          }, true);
+          avatar.addEventListener('dblclick', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (String(senderId) === String(state.selfUserId || '')) {
+              return;
+            }
+            vscode.postMessage({
+              type: 'openPrivateChatFromAvatar',
+              targetId: senderId,
+              title: sender,
+            });
           }, true);
         }
 
