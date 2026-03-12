@@ -14,7 +14,19 @@ function buildReplyPreviewFromSegments(segments) {
       }
       continue;
     }
-    if (seg.type === 'mention' || seg.type === 'face' || seg.type === 'reply' || seg.type === 'forward' || seg.type === 'poke_notice' || seg.type === 'recall_notice') {
+    if (seg.type === 'mention' || seg.type === 'face' || seg.type === 'reply' || seg.type === 'poke_notice' || seg.type === 'recall_notice') {
+      const text = String(seg.text || '').trim();
+      if (text) {
+        parts.push(text);
+      }
+      continue;
+    }
+    if (seg.type === 'forward') {
+      const previewLines = Array.isArray(seg.previewLines) ? seg.previewLines.filter(Boolean).slice(0, 2) : [];
+      if (previewLines.length > 0) {
+        parts.push(previewLines.join(' / '));
+        continue;
+      }
       const text = String(seg.text || '').trim();
       if (text) {
         parts.push(text);
@@ -186,8 +198,10 @@ function buildReplyRenderableSegments(segments) {
 
     if (type === 'forward') {
       out.push({
-        type: 'text',
+        type: 'forward',
+        forwardId: String(seg.forwardId || '').trim(),
         text: String(seg.text || '[合并转发]').trim() || '[合并转发]',
+        previewLines: Array.isArray(seg.previewLines) ? seg.previewLines.filter(Boolean).slice(0, 4) : [],
       });
       continue;
     }
@@ -259,10 +273,17 @@ async function decorateSegmentsForDisplay(runtime, segments, context = {}) {
           try {
             const resp = await runtime.callApi('get_msg', { message_id: Number(replyId) || replyId });
             const sender = resp?.data?.sender || {};
-            if (!refName) {
-              refName = String(sender.card || sender.nickname || sender.user_id || '').trim();
-            }
             const sid = String(sender.user_id || '').trim();
+            if (!refName) {
+              refName = String(
+                runtime.getDisplayName(sid, groupId) ||
+                runtime.getDisplayName(sid) ||
+                sender.card ||
+                sender.nickname ||
+                sender.user_id ||
+                ''
+              ).trim();
+            }
             if (sid && refName) {
               runtime.rememberDisplayName(sid, refName, groupId);
             }

@@ -85,6 +85,17 @@ function renderListForwardOverlayRenderScript() {
             return;
           }
 
+          if (draft.mode === 'forward') {
+            vscode.postMessage({
+              type: 'sendForwardMessage',
+              chatId: chat.id,
+              forwardId: String(draft.forwardId || ''),
+              rawMessageId: String(draft.rawMessageId || ''),
+            });
+            closeMessageForwardPicker();
+            return;
+          }
+
           if (draft.mode === 'message') {
             (async () => {
               const imageUrls = Array.isArray(draft.imageUrls) ? draft.imageUrls : [];

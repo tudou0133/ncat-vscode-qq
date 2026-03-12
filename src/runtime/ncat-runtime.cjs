@@ -21,7 +21,7 @@ const {
 } = require('./history-loader.cjs');
 const { buildLocalEchoSegments, buildOneBotMessage, normalizeOutgoingRequest } = require('./outgoing-message.cjs');
 const { decorateSegmentsForDisplay } = require('./segment-decorator.cjs');
-const { getForwardPreview } = require('./forward-preview.cjs');
+const { getForwardPreview, getForwardSendNodes } = require('./forward-preview.cjs');
 
 const LOGIN_ECHO_PREFIX = 'vscode-login-';
 const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1006,7 +1006,19 @@ function buildReplyPreviewFromSegments(segments) {
       }
       continue;
     }
-    if (seg.type === 'mention' || seg.type === 'face' || seg.type === 'reply' || seg.type === 'forward' || seg.type === 'poke_notice' || seg.type === 'recall_notice') {
+    if (seg.type === 'mention' || seg.type === 'face' || seg.type === 'reply' || seg.type === 'poke_notice' || seg.type === 'recall_notice') {
+      const text = String(seg.text || '').trim();
+      if (text) {
+        parts.push(text);
+      }
+      continue;
+    }
+    if (seg.type === 'forward') {
+      const previewLines = Array.isArray(seg.previewLines) ? seg.previewLines.filter(Boolean).slice(0, 2) : [];
+      if (previewLines.length > 0) {
+        parts.push(previewLines.join(' / '));
+        continue;
+      }
       const text = String(seg.text || '').trim();
       if (text) {
         parts.push(text);
@@ -1159,8 +1171,10 @@ function buildReplyRenderableSegments(segments) {
 
     if (type === 'forward') {
       out.push({
-        type: 'text',
+        type: 'forward',
+        forwardId: String(seg.forwardId || '').trim(),
         text: String(seg.text || '[合并转发]').trim() || '[合并转发]',
+        previewLines: Array.isArray(seg.previewLines) ? seg.previewLines.filter(Boolean).slice(0, 4) : [],
       });
       continue;
     }
@@ -3771,16 +3785,30 @@ class NCatRuntime {
     }
 
     const senderId = String(payload?.user_id || '');
-    const senderName = String(payload?.sender?.card || payload?.sender?.nickname || senderId || 'unknown');
+    const groupPreferredName = isGroup && senderId
+      ? (
+          senderId === String(this.selfUserId || '').trim()
+            ? this.getSelfDisplayName(targetId)
+            : (this.getDisplayName(senderId, targetId) || this.getDisplayName(senderId))
+        )
+      : '';
+    const senderName = String(
+      (isGroup ? groupPreferredName : '') ||
+      payload?.sender?.card ||
+      payload?.sender?.nickname ||
+      senderId ||
+      'unknown'
+    );
     this.rememberDisplayName(senderId, senderName, isGroup ? targetId : '');
     if (isGroup && senderId) {
       const cachedMembers = this.groupMembersByGroupId.get(targetId);
       if (Array.isArray(cachedMembers)) {
         const idx = cachedMembers.findIndex((item) => item.userId === senderId);
+        const existing = idx >= 0 ? cachedMembers[idx] : null;
         const nextEntry = {
           userId: senderId,
           displayName: senderName || `QQ ${senderId}`,
-          card: String(payload?.sender?.card || '').trim(),
+          card: String(payload?.sender?.card || existing?.card || '').trim(),
           nickname: String(payload?.sender?.nickname || '').trim(),
         };
         if (idx >= 0) {
@@ -3918,10 +3946,14 @@ class NCatRuntime {
       }
       const refMsg = session.messageIdIndex.get(replyId);
       const refName = String(refMsg?.senderName || refMsg?.senderId || '').trim();
-      const refPreview = buildReplyPreviewFromSegments(Array.isArray(refMsg?.segments) ? refMsg.segments : []);
+      const refSegments = Array.isArray(refMsg?.segments) ? refMsg.segments : [];
+      const refPreview = buildReplyPreviewFromSegments(refSegments);
       return {
         ...seg,
         text: formatReplyLabel(replyId, refName, refPreview),
+        replyName: refName,
+        replyPreview: refPreview,
+        replySegments: buildReplyRenderableSegments(refSegments),
       };
     });
   }
@@ -4746,6 +4778,124 @@ class NCatRuntime {
     return response;
   }
 
+  async sendForwardMessageToChat(chatId, forwardId, sourceMessageId = '') {
+    const ok = await this.ensureConnected();
+    if (!ok) {
+      throw new Error('NCat is not connected.');
+    }
+
+    const fullId = String(chatId || '').trim();
+    const value = String(forwardId || '').trim();
+    if (!fullId || !value) {
+      throw new Error('Chat ID or forward ID is empty.');
+    }
+
+    const splitAt = fullId.indexOf(':');
+    if (splitAt <= 0 || splitAt === fullId.length - 1) {
+      throw new Error(`Unsupported chat id: ${fullId}`);
+    }
+
+    const chatType = fullId.slice(0, splitAt);
+    const targetId = fullId.slice(splitAt + 1);
+    if (chatType !== 'private' && chatType !== 'group') {
+      throw new Error(`Unsupported chat type: ${chatType}`);
+    }
+
+    let response = null;
+    const sourceId = String(sourceMessageId || '').trim();
+    let actionUsed = '';
+    let usedSingleForward = false;
+
+    if (sourceId) {
+      const singleAction = chatType === 'group' ? 'forward_group_single_msg' : 'forward_friend_single_msg';
+      const singleParams = chatType === 'group'
+        ? {
+            group_id: toActionId(targetId),
+            message_id: toActionId(sourceId),
+          }
+        : {
+            user_id: toActionId(targetId),
+            message_id: toActionId(sourceId),
+          };
+
+      this.log(`send_forward_msg -> chat=${fullId}, forwardId=${value}, sourceMessageId=${sourceId}, action=${singleAction}`);
+      response = await this.callApi(singleAction, singleParams, { timeoutMs: 20_000 });
+      if (response?.status === 'ok') {
+        usedSingleForward = true;
+        actionUsed = singleAction;
+      } else {
+        this.log(
+          `send_forward_msg single-forward failed -> chat=${fullId}, sourceMessageId=${sourceId}, reason=${String(
+            response?.wording || response?.message || 'unknown'
+          )}`
+        );
+      }
+    }
+
+    if (!usedSingleForward) {
+      const messages = await getForwardSendNodes(this, value, {
+        chatType,
+        targetId,
+        chatId: fullId,
+      });
+
+      const action = chatType === 'group' ? 'send_group_forward_msg' : 'send_private_forward_msg';
+      const params = chatType === 'group'
+        ? {
+            group_id: toActionId(targetId),
+            messages,
+          }
+        : {
+            user_id: toActionId(targetId),
+            messages,
+          };
+
+      this.log(`send_forward_msg -> chat=${fullId}, forwardId=${value}, action=${action}`);
+      response = await this.callApi(action, params, { timeoutMs: 20_000 });
+      actionUsed = action;
+    }
+
+    if (response?.status !== 'ok') {
+      throw new Error(response?.wording || response?.message || 'Unknown NCat error.');
+    }
+
+    const sessionId = `${chatType}:${targetId}`;
+    const session = this.chatSessions.get(sessionId);
+    const title = chatType === 'group'
+      ? String(session?.title || `群 ${targetId}`)
+      : String(session?.title || `QQ ${targetId}`);
+    const avatarUrl = chatType === 'group' ? getGroupAvatarUrl(targetId) : getPrivateAvatarUrl(targetId);
+    const summary = this.getForwardSummary(value);
+    const displaySegments = [{
+      type: 'forward',
+      forwardId: value,
+      text: '[合并转发]',
+      previewLines: Array.isArray(summary?.lines) ? summary.lines.slice(0, 4) : [],
+    }];
+
+    this.appendMessageToSession({
+      chatId: sessionId,
+      type: chatType,
+      targetId,
+      title,
+      avatarUrl,
+      direction: 'out',
+      senderId: this.selfUserId || '',
+      senderName: chatType === 'group' ? this.getSelfDisplayName(targetId) : (this.selfNickname || 'Me'),
+      senderAvatarUrl: this.selfUserId ? getPrivateAvatarUrl(this.selfUserId) : '',
+      segments: displaySegments,
+      timestamp: Date.now(),
+      messageId: response?.data?.message_id ? String(response.data.message_id) : '',
+      rawMessageId: response?.data?.message_id ? String(response.data.message_id) : '',
+      countUnread: false,
+    });
+    if (usedSingleForward) {
+      this.log(`send_forward_msg single-forward success -> chat=${fullId}, action=${actionUsed}`);
+    }
+
+    return response;
+  }
+
   applyLocalRecall(chatId, rawMessageId, localMessageId = '') {
     const fullId = String(chatId || '').trim();
     const session = this.chatSessions.get(fullId);
@@ -5388,22 +5538,42 @@ class NCatRuntime {
     if (!key || !summary || !Array.isArray(summary.lines) || summary.lines.length === 0) {
       return false;
     }
+    const applyToSegmentList = (segments) => {
+      let localChanged = false;
+      const list = Array.isArray(segments) ? segments : [];
+      for (const seg of list) {
+        if (!seg || typeof seg !== 'object') {
+          continue;
+        }
+        if (seg.type === 'forward' && String(seg.forwardId || '').trim() === key) {
+          const current = Array.isArray(seg.previewLines) ? seg.previewLines : [];
+          const sameLength = current.length === summary.lines.length;
+          const sameContent = sameLength && current.every((item, index) => item === summary.lines[index]);
+          if (!sameContent) {
+            seg.previewLines = summary.lines.slice();
+            localChanged = true;
+          }
+        }
+        if (Array.isArray(seg.replySegments) && seg.replySegments.length > 0) {
+          const nestedChanged = applyToSegmentList(seg.replySegments);
+          if (nestedChanged) {
+            localChanged = true;
+            const replyId = String(seg.replyId || '').trim();
+            const refName = String(seg.replyName || '').trim();
+            const refPreview = buildReplyPreviewFromSegments(seg.replySegments);
+            seg.replyPreview = refPreview;
+            seg.text = formatReplyLabel(replyId, refName, refPreview);
+          }
+        }
+      }
+      return localChanged;
+    };
+
     let changed = false;
     for (const session of this.chatSessions.values()) {
       const messages = Array.isArray(session?.messages) ? session.messages : [];
       for (const message of messages) {
-        const segments = Array.isArray(message?.segments) ? message.segments : [];
-        for (const seg of segments) {
-          if (!seg || seg.type !== 'forward' || String(seg.forwardId || '').trim() !== key) {
-            continue;
-          }
-          const current = Array.isArray(seg.previewLines) ? seg.previewLines : [];
-          const sameLength = current.length === summary.lines.length;
-          const sameContent = sameLength && current.every((item, index) => item === summary.lines[index]);
-          if (sameContent) {
-            continue;
-          }
-          seg.previewLines = summary.lines.slice();
+        if (applyToSegmentList(message?.segments)) {
           changed = true;
         }
       }
@@ -5503,19 +5673,21 @@ class NCatRuntime {
     });
   }
 
-  callApi(action, params) {
+  callApi(action, params, options = {}) {
     if (!this.isConnected() || !this.ws) {
       return Promise.reject(new Error('NCat is not connected.'));
     }
 
     const echo = `req-${++this.seq}`;
+    const timeoutMsRaw = Number(options?.timeoutMs);
+    const timeoutMs = Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0 ? timeoutMsRaw : 8000;
 
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(echo);
         this.log(`API timeout: ${action}, echo=${echo}`);
         reject(new Error(`NCat API timeout: ${action}`));
-      }, 8000);
+      }, timeoutMs);
 
       this.pendingRequests.set(echo, {
         resolve,

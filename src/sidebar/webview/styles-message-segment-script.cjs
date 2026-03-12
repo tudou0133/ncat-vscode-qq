@@ -91,6 +91,20 @@ function renderWebviewMessageSegmentStyles() {
       font-size: 9px;
     }
 
+    .seg-reply .seg-forward {
+      max-width: 180px;
+      padding: 1px 0 1px 6px;
+      margin: 1px 0;
+      gap: 2px;
+      border-left-width: 2px;
+    }
+
+    .seg-reply .seg-forward-title,
+    .seg-reply .seg-forward-preview-line {
+      font-size: 9px;
+      line-height: 1.2;
+    }
+
     .seg-reply .seg-image-thumb,
     .seg-reply .seg-video-thumb {
       border-radius: 7px;

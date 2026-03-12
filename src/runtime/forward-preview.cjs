@@ -129,7 +129,7 @@ async function getForwardPreview(runtime, forwardId, context = {}) {
       payload.user_id || payload.sender_id || sender.user_id || payload.uin || payload.qq || ''
     ).trim();
     const senderName = String(
-      payload.nickname || payload.name || payload.title || sender.card || sender.nickname || senderId || 'unknown'
+      sender.card || payload.nickname || payload.name || payload.title || sender.nickname || senderId || 'unknown'
     ).trim();
     if (senderId && senderName) {
       runtime.rememberDisplayName(senderId, senderName, chatType === 'group' ? targetId : '');
@@ -172,6 +172,66 @@ async function getForwardPreview(runtime, forwardId, context = {}) {
   };
 }
 
+async function getForwardSendNodes(runtime, forwardId, context = {}) {
+  const value = String(forwardId || '').trim();
+  if (!value) {
+    throw new Error('Forward ID is empty.');
+  }
+
+  const ok = await runtime.ensureConnected();
+  if (!ok) {
+    throw new Error('NCat is not connected.');
+  }
+
+  const response = await callGetForwardMsg(runtime, value);
+  const rawNodes = extractForwardNodes(response);
+  const chatType = String(context.chatType || '');
+  const targetId = String(context.targetId || '');
+
+  const nodes = [];
+  for (const item of rawNodes) {
+    const payload = extractNodePayload(item);
+    const sender = payload.sender && typeof payload.sender === 'object' ? payload.sender : {};
+    const senderId = String(
+      payload.user_id || payload.sender_id || sender.user_id || payload.uin || payload.qq || ''
+    ).trim();
+    const senderName = String(
+      sender.card || payload.nickname || payload.name || payload.title || sender.nickname || senderId || 'unknown'
+    ).trim();
+    if (senderId && senderName) {
+      runtime.rememberDisplayName(senderId, senderName, chatType === 'group' ? targetId : '');
+    }
+
+    const contentPayload = extractNodeContent(payload);
+    let content = null;
+    if (Array.isArray(contentPayload?.message) && contentPayload.message.length > 0) {
+      content = contentPayload.message;
+    } else if (typeof contentPayload?.raw_message === 'string' && contentPayload.raw_message.trim()) {
+      content = contentPayload.raw_message;
+    }
+    if (!content) {
+      continue;
+    }
+
+    nodes.push({
+      type: 'node',
+      data: {
+        user_id: senderId || String(runtime.selfUserId || '').trim() || '0',
+        nickname: senderName || senderId || 'unknown',
+        uin: senderId || String(runtime.selfUserId || '').trim() || '0',
+        name: senderName || senderId || 'unknown',
+        content,
+      },
+    });
+  }
+
+  if (nodes.length === 0) {
+    throw new Error('get_forward_msg returned no sendable nodes.');
+  }
+  return nodes;
+}
+
 module.exports = {
   getForwardPreview,
+  getForwardSendNodes,
 };

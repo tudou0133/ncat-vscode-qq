@@ -540,6 +540,7 @@ function summarizeJsonPayload(rawJson) {
   const news = parsed.meta?.news || {};
   const contact = parsed.meta?.contact || {};
   const notify = parsed.meta?.notify || {};
+  const app = String(parsed.app || '').trim().toLowerCase();
   const prompt = String(parsed.prompt || parsed.desc || detail.desc || news.desc || notify.title || '').trim();
   const title = String(
     detail.title ||
@@ -560,6 +561,39 @@ function summarizeJsonPayload(rawJson) {
     prompt
   ).trim();
   const url = findBestHttpUrlInObject(parsed) || extractFirstHttpUrlFromText(raw);
+  const resid = String(
+    detail.resid ||
+    detail.uniseq ||
+    detail.m_resid ||
+    parsed.resid ||
+    parsed.uniseq ||
+    parsed.m_resid ||
+    ''
+  ).trim();
+  const previewLines = Array.isArray(detail.news)
+    ? detail.news
+        .map((item) => String(item?.text || item?.title || item?.desc || '').trim())
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
+  const isForwardLike =
+    !!resid &&
+    (
+      app === 'com.tencent.multimsg' ||
+      /聊天记录/.test(String(parsed.desc || '').trim()) ||
+      /聊天记录/.test(String(parsed.prompt || '').trim()) ||
+      /聊天记录/.test(String(title || '').trim())
+    );
+
+  if (isForwardLike) {
+    return {
+      type: 'forward',
+      forwardId: resid,
+      text: '[聊天记录]',
+      previewLines,
+      raw,
+    };
+  }
 
   return {
     type: 'json',

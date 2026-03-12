@@ -228,6 +228,17 @@ function renderMenuActionsScript() {
           summary: '转发 JSON 消息',
         };
       }
+      const segments = Array.isArray(msg.segments) ? msg.segments : [];
+      const forwardSeg = segments.find((seg) => seg && seg.type === 'forward' && String(seg.forwardId || '').trim());
+      if (forwardSeg) {
+        const previewLines = Array.isArray(forwardSeg.previewLines) ? forwardSeg.previewLines.filter(Boolean).slice(0, 2) : [];
+        return {
+          mode: 'forward',
+          forwardId: String(forwardSeg.forwardId || '').trim(),
+          rawMessageId: String(msg.rawMessageId || '').trim(),
+          summary: previewLines.length > 0 ? ('转发聊天记录：' + previewLines.join(' / ')) : '转发聊天记录',
+        };
+      }
       const imageUrls = getMessageImageUrls(msg);
       const text = getMessageActionText(msg, {
         includeImagePlaceholder: false,

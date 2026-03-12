@@ -910,6 +910,42 @@ class NCatSidebarProvider {
         return;
       }
 
+      if (msg.type === 'sendForwardMessage') {
+        const chatId = String(msg.chatId || this.selectedChatId || '').trim();
+        const forwardId = String(msg.forwardId || '').trim();
+        const rawMessageId = String(msg.rawMessageId || '').trim();
+        if (!chatId || !forwardId) {
+          this.view?.webview.postMessage({
+            type: 'quickActionResult',
+            action: 'forwardSend',
+            ok: false,
+            error: 'invalid forward payload',
+          });
+          return;
+        }
+
+        try {
+          await this.runtime.sendForwardMessageToChat(chatId, forwardId, rawMessageId);
+          this.pushState();
+          this.view?.webview.postMessage({
+            type: 'quickActionResult',
+            action: 'forwardSend',
+            ok: true,
+          });
+        } catch (error) {
+          const reason = error?.message || String(error);
+          this.runtime.log(`send_forward_message failed: chatId=${chatId}, forwardId=${forwardId}, reason=${reason}`);
+          vscode.window.showErrorMessage(`转发聊天记录失败: ${reason}`);
+          this.view?.webview.postMessage({
+            type: 'quickActionResult',
+            action: 'forwardSend',
+            ok: false,
+            error: reason,
+          });
+        }
+        return;
+      }
+
       if (msg.type === 'recallChatMessage') {
         const chatId = String(msg.chatId || this.selectedChatId || '').trim();
         const rawMessageId = String(msg.rawMessageId || '').trim();
